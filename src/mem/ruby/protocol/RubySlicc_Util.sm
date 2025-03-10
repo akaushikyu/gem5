@@ -62,3 +62,4 @@ structure(BoolVec, external="yes") {
 }
 int countBoolVec(BoolVec bVec);
 RequestorID getRequestorID(RequestPtr req);
+void recordCoherenceHistory(Addr, int, int, MachineID);

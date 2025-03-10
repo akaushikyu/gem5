@@ -64,6 +64,12 @@ makeLineAddress(Addr addr, int cacheLineBits)
     return maskLowOrderBits(addr, cacheLineBits);
 }
 
+Addr
+makeLineAddress(Addr addr)
+{
+    return maskLowOrderBits(addr, 63);
+}
+
 // returns the next stride address based on line address
 Addr
 makeNextStrideAddress(Addr addr, int stride, int cacheLineBytes)

@@ -589,7 +589,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
         out_msg.Class := CoherenceClass:GETS;
         out_msg.Sender := machineID;
         out_msg.Dest := createMachineID(MachineType:L1Cache, version);
-        DPRINTF(RubySlicc, "address: %#x, destination: %s\n",
+        DPRINTF(RubySlicc, "load address: %#x, destination: %s\n",
                 address, out_msg.Dest);
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.AccessMode := in_msg.AccessMode;
@@ -606,7 +606,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
         DPRINTF(RubySlicc, "%s\n", machineID);
         out_msg.Dest := createMachineID(MachineType:L1Cache, version);
 
-        DPRINTF(RubySlicc, "address: %#x, destination: %s\n",
+        DPRINTF(RubySlicc, "store address: %#x, destination: %s\n",
                 address, out_msg.Dest);
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.AccessMode := in_msg.AccessMode;
@@ -622,7 +622,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
         out_msg.Sender := machineID;
         out_msg.Dest := createMachineID(MachineType:L1Cache, version);
 
-        DPRINTF(RubySlicc, "address: %#x, destination: %s\n",
+        DPRINTF(RubySlicc, "upgrade address: %#x, destination: %s\n",
                 address, out_msg.Dest);
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.AccessMode := in_msg.AccessMode;
@@ -683,7 +683,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
 
   action(h_load_hit, "hd", desc="Notify sequencer the load completed (cache hit)") {
     assert(is_valid(cache_entry));
-    DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+    DPRINTF(RubySlicc, "h_load_hit %#x, %s\n", address, cache_entry.DataBlk);
     Dcache.setMRU(cache_entry);
     sequencer.readCallback(address, cache_entry.DataBlk);
   }
@@ -700,7 +700,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
   // serviced the miss.
   action(hx_load_hit, "hxd", desc="Notify sequencer the load completed (cache miss)") {
     assert(is_valid(cache_entry));
-    DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+    DPRINTF(RubySlicc, "hx_load_hit %#x, %s\n", address, cache_entry.DataBlk);
     Dcache.setMRU(cache_entry);
     sequencer.readCallback(address, cache_entry.DataBlk, true);
   }
@@ -717,7 +717,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
 
   action(hh_store_hit, "\h", desc="Notify sequencer that store completed (cache hit)") {
     assert(is_valid(cache_entry));
-    DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+    DPRINTF(RubySlicc, "hh_store_hit %#x, %s\n", address, cache_entry.DataBlk);
     Dcache.setMRU(cache_entry);
     sequencer.writeCallback(address, cache_entry.DataBlk);
     cache_entry.Dirty := true;
@@ -728,7 +728,7 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
   // serviced the miss.
   action(hhx_store_hit, "\hx", desc="Notify sequencer that store completed (cache miss)") {
     assert(is_valid(cache_entry));
-    DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+    DPRINTF(RubySlicc, "hhx_store_hit %#x, %s\n", address, cache_entry.DataBlk);
     Dcache.setMRU(cache_entry);
     sequencer.writeCallback(address, cache_entry.DataBlk, true);
     cache_entry.Dirty := true;

@@ -47,6 +47,7 @@ Addr bitSelect(Addr addr, unsigned int small, unsigned int big);
 Addr maskLowOrderBits(Addr addr, unsigned int number);
 Addr getOffset(Addr addr, int cacheLineBits);
 Addr makeLineAddress(Addr addr, int cacheLineBits);
+Addr makeLineAddress(Addr addr);
 Addr makeNextStrideAddress(Addr addr, int stride, int cacheLineBytes);
 std::string printAddress(Addr addr, int cacheLineBits);
 

@@ -73,6 +73,7 @@ AbstractController::AbstractController(const Params &p)
         // of this particular type.
         statistics::registerDumpCallback([this]() { collateStats(); });
     }
+    statistics::registerDumpCallback([this]() { dumpCoherenceHistory(); } );
 }
 
 void
@@ -549,6 +550,21 @@ ControllerStats::ControllerStats(statistics::Group *parent)
     delayHistogram
         .flags(statistics::nozero);
 }
+
+
+void AbstractController::dumpCoherenceHistory() {
+  // dump out the recorded cache coherence trace...
+  for (std::unordered_map<Addr, std::vector<eventStateTimeTriple> >::iterator it = m_addrCoherenceHistoryMap.begin();
+        it != m_addrCoherenceHistoryMap.end();
+        it++) {
+    if (it->second.size() > 1) {
+      for (auto i : it->second) {
+        std::cout<<std::hex<<it->first<<","<<i.event<<","<<i.currState<<","<<i.mid<<"\n";
+      }
+    }
+  }
+}
+
 
 } // namespace ruby
 } // namespace gem5

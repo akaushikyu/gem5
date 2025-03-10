@@ -257,6 +257,23 @@ class AbstractController : public ClockedObject, public Consumer
     std::unordered_map<Addr, TransMapPair> m_inTransUnaddressed;
     std::unordered_map<Addr, TransMapPair> m_outTransUnaddressed;
 
+    // [ANI] Tracking data structure for coherence guided prefetching..
+    // Address, <(GetM/GetS, currentState)>
+    struct eventStateTimeTriple {unsigned event; unsigned currState; Tick time; unsigned int mid;};
+    std::unordered_map<Addr, std::vector<eventStateTimeTriple> > m_addrCoherenceHistoryMap;
+
+    void recordCoherenceHistory(Addr addr, unsigned eventType, unsigned currState, MachineID mid) {
+      eventStateTimeTriple t = {eventType, currState, curTick(), mid.getNum()};
+      if (m_addrCoherenceHistoryMap.find(addr) == m_addrCoherenceHistoryMap.end()) {
+        std::vector<eventStateTimeTriple> tv = {t};
+        m_addrCoherenceHistoryMap.insert({addr, tv});
+      } else {
+        m_addrCoherenceHistoryMap[addr].push_back(t);
+      }
+    }
+
+    void dumpCoherenceHistory();
+
     /**
      * Profiles an event that initiates a protocol transactions for a specific
      * line (e.g. events triggered by incoming request messages).

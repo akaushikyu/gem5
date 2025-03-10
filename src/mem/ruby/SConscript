@@ -130,3 +130,5 @@ MakeInclude('system/GPUCoalescer.hh')
 MakeInclude('system/HTMSequencer.hh')
 MakeInclude('system/VIPERCoalescer.hh')
 MakeInclude('system/VIPERSequencer.hh')
+
+MakeInclude('profiler/CustomProfiler.hh')

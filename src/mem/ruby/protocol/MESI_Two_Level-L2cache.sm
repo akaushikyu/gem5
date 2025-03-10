@@ -411,6 +411,29 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   // ACTIONS
 
+  action(recordGETS, desc="record gets transaction") {
+    peek(L1RequestL2Network_in, RequestMsg) {
+      Entry cache_entry := getCacheEntry(in_msg.addr);
+      TBE tbe := TBEs[in_msg.addr];
+      State initial := getState(tbe, cache_entry, address);
+      int reqType := static_cast(int, "value", CoherenceRequestType:GETS);
+      int initialState := static_cast(int, "value", initial);
+      DPRINTF(RubySlicc, "RECORDING GETS from %s to %x\n", in_msg.Requestor, address);
+      //recordCoherenceHistory(address, reqType, initialState, in_msg.Requestor);
+    }
+  }
+
+  action(recordGETX, desc="record getx transaction") {
+    peek(L1RequestL2Network_in, RequestMsg) {
+      Entry cache_entry := getCacheEntry(in_msg.addr);
+      TBE tbe := TBEs[in_msg.addr];
+      State initial := getState(tbe, cache_entry, address);
+      int reqType := static_cast(int, "value", CoherenceRequestType:GETX);
+      int initialState := static_cast(int, "value", initial);
+      //recordCoherenceHistory(address, reqType, initialState, in_msg.Requestor);
+    }
+  }
+
   action(a_issueFetchToMemory, "a", desc="fetch data from memory") {
     peek(L1RequestL2Network_in, RequestMsg) {
       enqueue(DirRequestL2Network_out, RequestMsg, l2_request_latency) {
@@ -834,12 +857,23 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
 
-  transition({SS_MB, MT_MB, MT_IIB, MT_IB, MT_SB}, {L1_GETS, L1_GET_INSTR, L1_GETX, L1_UPGRADE}) {
+  transition({SS_MB, MT_MB, MT_IIB, MT_IB, MT_SB}, {L1_GETS}) {
+    recordGETS;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition({SS_MB, MT_MB, MT_IIB, MT_IB, MT_SB}, { L1_GET_INSTR, L1_UPGRADE}) {
+    recordGETX;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition({SS_MB, MT_MB, MT_IIB, MT_IB, MT_SB}, {L1_GETX}) {
     zz_stallAndWaitL1RequestQueue;
   }
 
 
   transition(NP, L1_GETS,  ISS) {
+    recordGETS;
     qq_allocateL2CacheBlock;
     ll_clearSharers;
     nn_addSharer;
@@ -862,6 +896,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   transition(NP, L1_GETX, IM) {
+    recordGETX;
     qq_allocateL2CacheBlock;
     ll_clearSharers;
     // nn_addSharer;
@@ -897,7 +932,15 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     o_popIncomingResponseQueue;
   }
 
-  transition({IS, ISS}, {L1_GETS, L1_GET_INSTR}, IS) {
+  transition({IS, ISS}, {L1_GETS}, IS) {
+    recordGETS;
+    nn_addSharer;
+    ss_recordGetSL1ID;
+    uu_profileMiss;
+    jj_popL1RequestQueue;
+  }
+
+  transition({IS, ISS}, {L1_GET_INSTR}, IS) {
     nn_addSharer;
     ss_recordGetSL1ID;
     uu_profileMiss;
@@ -905,15 +948,36 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   transition({IS, ISS}, L1_GETX) {
+    recordGETX;
     zz_stallAndWaitL1RequestQueue;
   }
 
-  transition(IM, {L1_GETX, L1_GETS, L1_GET_INSTR}) {
+  transition(IM, {L1_GETX}) {
+    recordGETX;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition(IM, {L1_GETS}) {
+    recordGETS;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition(IM, {L1_GET_INSTR}) {
     zz_stallAndWaitL1RequestQueue;
   }
 
   // transitions from SS
-  transition(SS, {L1_GETS, L1_GET_INSTR}) {
+  transition(SS, {L1_GETS}) {
+    recordGETS;
+    ds_sendSharedDataToRequestor;
+    nn_addSharer;
+    set_setMRU;
+    uu_profileHit;
+    jj_popL1RequestQueue;
+  }
+
+  // transitions from SS
+  transition(SS, {L1_GET_INSTR}) {
     ds_sendSharedDataToRequestor;
     nn_addSharer;
     set_setMRU;
@@ -923,6 +987,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
 
   transition(SS, L1_GETX, SS_MB) {
+    recordGETX;
     d_sendDataToRequestor;
     // fw_sendFwdInvToSharers;
     fwm_sendFwdInvToSharersMinusRequestor;
@@ -932,6 +997,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   transition(SS, L1_UPGRADE, SS_MB) {
+    recordGETX;
     fwm_sendFwdInvToSharersMinusRequestor;
     ts_sendInvAckToUpgrader;
     set_setMRU;
@@ -953,6 +1019,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
 
   transition(M, L1_GETX, MT_MB) {
+    recordGETX;
     d_sendDataToRequestor;
     set_setMRU;
     uu_profileHit;
@@ -968,6 +1035,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   transition(M, L1_GETS, MT_MB) {
+    recordGETS;
     dd_sendExclusiveDataToRequestor;
     set_setMRU;
     uu_profileHit;
@@ -990,6 +1058,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   // transitions from MT
 
   transition(MT, L1_GETX, MT_MB) {
+    recordGETX;
     b_forwardRequestToExclusive;
     uu_profileMiss;
     set_setMRU;
@@ -997,7 +1066,15 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
 
-  transition(MT, {L1_GETS, L1_GET_INSTR}, MT_IIB) {
+  transition(MT, {L1_GETS}, MT_IIB) {
+    recordGETS;
+    b_forwardRequestToExclusive;
+    uu_profileMiss;
+    set_setMRU;
+    jj_popL1RequestQueue;
+  }
+
+  transition(MT, {L1_GET_INSTR}, MT_IIB) {
     b_forwardRequestToExclusive;
     uu_profileMiss;
     set_setMRU;
@@ -1057,7 +1134,22 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   // writeback states
-  transition({I_I, S_I, MT_I, MCT_I, M_I}, {L1_GETX, L1_UPGRADE, L1_GETS, L1_GET_INSTR}) {
+  transition({I_I, S_I, MT_I, MCT_I, M_I}, {L1_GETX}) {
+    recordGETX;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition({I_I, S_I, MT_I, MCT_I, M_I}, {L1_UPGRADE}) {
+    recordGETX;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition({I_I, S_I, MT_I, MCT_I, M_I}, {L1_GETS}) {
+    recordGETS;
+    zz_stallAndWaitL1RequestQueue;
+  }
+
+  transition({I_I, S_I, MT_I, MCT_I, M_I}, {L1_GET_INSTR}) {
     zz_stallAndWaitL1RequestQueue;
   }
 
