@@ -24,6 +24,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from m5.defines import buildEnv
 from m5.objects.ClockedObject import ClockedObject
 from m5.params import *
 
@@ -34,6 +35,15 @@ class BasicRouter(ClockedObject):
     cxx_class = "gem5::ruby::BasicRouter"
 
     router_id = Param.Int("ID in relation to other routers")
+
+    if buildEnv["PROTOCOL"] == "EXCL" or buildEnv["PROTOCOL"] == "INCL":
+        # Bus modeling related parameters
+        num_processor = Param.Int(1, "Number of processors")
+        tdm_slot_width = Param.Int(100, "TDM slot width in number of cycles")
+        resp_bus_slot_width = Param.Int(
+            10,
+            "The number of busy cycles to transmit a response on the response bus",
+        )
 
     # only used by garnet
     latency = Param.Cycles(1, "number of cycles inside router")

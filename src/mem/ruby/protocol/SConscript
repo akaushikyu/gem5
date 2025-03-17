@@ -84,12 +84,19 @@ def slicc_emitter(target, source, env):
             protocol_base.abspath,
             verbose=False,
         )
+
         slicc.process()
+
         slicc.writeCodeFiles(output_dir.abspath, slicc_includes)
         if env["CONF"]["SLICC_HTML"]:
             slicc.writeHTMLFiles(html_dir.abspath)
 
-        files.update([output_dir.File(f) for f in sorted(slicc.files())])
+
+        for f in sorted(slicc.files()):
+          fileName = str(f)
+          if ("RequestMsg" in fileName or "ResponseMsg" in fileName):
+            fileName = fileName.replace("INCL/","")
+          files.update([output_dir.File(fileName)])
 
         # Dynamically determine protocol and add ProtocolInfo.hh to the list of
         # files to be built
@@ -99,7 +106,6 @@ def slicc_emitter(target, source, env):
         files.update([protocol_file])
 
     return list(files), source
-
 
 def slicc_action(target, source, env):
     for s in source:

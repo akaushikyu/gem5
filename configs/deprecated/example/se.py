@@ -139,6 +139,12 @@ if "--ruby" in sys.argv:
 
 args = parser.parse_args()
 
+if buildEnv["PROTOCOL"] == "EXCL" or buildEnv["PROTOCOL"] == "INCL":
+    # override clock frequence settings
+    args.cpu_clock = "2GHz"
+    args.ruby_clock = "4GHz"
+    args.sys_clock = "2GHz"
+
 multiprocesses = []
 numThreads = 1
 

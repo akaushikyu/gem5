@@ -77,7 +77,13 @@ class Type(Symbol):
             else:
                 # Append with machine name
                 self.c_ident = f"{machine}_{ident}"
-        if shared or not table.slicc.protocol or self.isExternal:
+
+        if f"RequestMsg" in self.c_ident or f"ResponseMsg" in self.c_ident:
+            self.shared = True
+            # remove the protocol tag
+            self.c_ident = self.c_ident.replace("{table.slicc.protocol}/", "")
+
+        if self.shared or not table.slicc.protocol or self.isExternal:
             self.protocol_specific = ""
             self.gen_filename = self.c_ident
             self.header_string = self.c_ident
@@ -271,6 +277,17 @@ class RubySystem;
 
 """
         )
+
+        if (
+            self.header_string == "RequestMsg"
+            or self.header_string == "ResponseMsg"
+        ):
+            code(
+                """
+                using namespace ${{protocol}};
+                """
+            )
+
         # For protocol-specific types, wrap in the protocol namespace
         if not self.shared:
             code(
@@ -602,11 +619,19 @@ namespace ruby
 {
 """
         )
+        if (
+            self.header_string == "RequestMsg"
+            or self.header_string == "ResponseMsg"
+        ):
+            code(
+                """
+                using namespace ${{protocol}};
+                """
+            )
         # For protocol-specific types, wrap in the protocol namespace
         if not self.shared:
             code(
                 """
-
 namespace ${{protocol}}
 {
 """

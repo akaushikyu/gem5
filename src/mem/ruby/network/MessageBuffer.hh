@@ -90,6 +90,16 @@ class MessageBuffer : public SimObject
     Tick readyTime() const;
 
     void
+    delayHead(Tick current_time, Tick delta)
+    {
+        MsgPtr m = m_prio_heap.front();
+        std::pop_heap(m_prio_heap.begin(), m_prio_heap.end(),
+                      std::greater<MsgPtr>());
+        m_prio_heap.pop_back();
+        enqueue(m, current_time, delta, false, false);
+    }
+
+    void
     delayHead(Tick current_time, Tick delta, bool ruby_is_random,
               bool ruby_warmup)
     {
@@ -196,6 +206,8 @@ class MessageBuffer : public SimObject
 
     int routingPriority() const { return m_routing_priority; }
 
+    std::vector<MsgPtr> m_prio_heap;
+
   private:
     void reanalyzeList(std::list<MsgPtr> &, Tick);
 
@@ -205,7 +217,6 @@ class MessageBuffer : public SimObject
     // Data Members (m_ prefix)
     //! Consumer to signal a wakeup(), can be NULL
     Consumer* m_consumer;
-    std::vector<MsgPtr> m_prio_heap;
 
     std::function<void()> m_dequeue_callback;
 

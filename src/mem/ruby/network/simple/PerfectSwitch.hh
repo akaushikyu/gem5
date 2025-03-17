@@ -69,7 +69,11 @@ class Switch;
 class PerfectSwitch : public Consumer
 {
   public:
+#ifdef SNOOPING_BUS
+    PerfectSwitch(SwitchID sid, Switch *, uint32_t, int, int, int);
+#else
     PerfectSwitch(SwitchID sid, Switch *, uint32_t);
+#endif
     ~PerfectSwitch();
 
     std::string name()
@@ -129,6 +133,22 @@ class PerfectSwitch : public Consumer
     std::vector<int> m_pending_message_count;
 
     MessageBuffer* inBuffer(int in_port, int vnet) const;
+#ifdef SNOOPING_BUS
+    // Bus arbitration support
+    int m_num_processor;
+    int m_tdm_slot_width;
+    int m_resp_bus_slot_width;
+    int m_request_bus_owner = 0;
+    uint64_t m_req_bus_next_free_cycle = 0;
+    bool isStartOfSlot();
+    uint64_t getNextSlotStartCycle();
+    void operateTDMRequestBus(int vnet);
+    void operateMessageBufferOnce(MessageBuffer *buffer, int vnet);
+
+    uint64_t m_resp_bus_next_free_cycle = 0;
+    void operateOARespBus(int vnet);
+#endif
+
 };
 
 inline std::ostream&

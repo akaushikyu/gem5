@@ -369,6 +369,11 @@ AbstractController::functionalMemoryWrite(PacketPtr pkt)
 {
     int num_functional_writes = 0;
 
+    // TODO: check this
+    // PECC
+    MessageBuffer *req_queue = getMemReqQueue();
+    req_queue->functionalWrite(pkt);
+
     // Update memory itself.
     memoryPort.sendFunctional(pkt);
     return num_functional_writes + 1;
@@ -521,7 +526,9 @@ AbstractController::machineCount(MachineType machType)
 bool
 AbstractController::MemoryPort::recvTimingResp(PacketPtr pkt)
 {
-    return controller->recvTimingResp(pkt);
+    controller->recvTimingResp(pkt);
+    // PECC
+    return true;
 }
 
 void
