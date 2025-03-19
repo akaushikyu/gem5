@@ -185,7 +185,9 @@ def create_system(
             tagAccessLatency=options.l2_latency,
             resourceStalls=True,
         )
-        dir_memory = RubyDirectoryMemory()
+        dir_memory = RubyDirectoryMemory(
+            block_size=ruby_system.block_size_bytes
+        )
         dir_memory.addr_ranges = [
             m5.objects.AddrRange(
                 r.start, 
@@ -242,7 +244,9 @@ def create_system(
     )
 
     # create directory
-    dir_memory = RubyDirectoryMemory()
+    dir_memory = RubyDirectoryMemory(
+        block_size=ruby_system.block_size_bytes
+    )
     dir_cntrl = Directory_Controller(
         version=0,
         directory=dir_memory,
