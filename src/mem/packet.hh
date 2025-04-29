@@ -376,6 +376,12 @@ class Packet : public Printable, public Extensible<Packet>
     /// A pointer to the original request.
     RequestPtr req;
 
+    // Issue cycle
+    Cycles issuedCycle;
+
+    // Completed cycle
+    Cycles completeCycle;
+
   private:
    /**
     * A pointer to the data being transferred. It can be different

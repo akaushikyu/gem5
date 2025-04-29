@@ -264,6 +264,12 @@ TimingSimpleCPU::handleReadPacket(PacketPtr pkt)
     SimpleExecContext &t_info = *threadInfo[curThread];
     SimpleThread* thread = t_info.thread;
 
+    // If the ROI is active, then mark the request with a flag
+    // to denote that the request is of timing interest
+    if (system->isAddrRegistered(pkt->req->getVaddr())) {
+      pkt->req->reqInROI = true;
+    }
+
     const RequestPtr &req = pkt->req;
 
     // hardware transactional memory
@@ -271,6 +277,11 @@ TimingSimpleCPU::handleReadPacket(PacketPtr pkt)
     if (req->isHTMCmd()) {
         assert(!req->isLocalAccess());
     }
+
+    DPRINTF(SimpleCPU, "Issuing access to memory hierarchy to addr: %#x, %#x, PC: %#x, cycle: %s\n",
+          pkt->getAddr(), pkt->req->getVaddr(), pkt->req->getPC(), curCycle());
+
+    pkt->issuedCycle = curCycle();
 
     // We're about the issues a locked load, so tell the monitor
     // to start caring about this address
@@ -302,6 +313,12 @@ TimingSimpleCPU::sendData(const RequestPtr &req, uint8_t *data, uint64_t *res,
 
     PacketPtr pkt = buildPacket(req, read);
     pkt->dataDynamic<uint8_t>(data);
+
+    // If the ROI is active, then mark the request with a flag
+    // to denote that the request is of timing interest
+    if (system->isAddrRegistered(pkt->req->getVaddr())) {
+      pkt->req->reqInROI = true;
+    }
 
     // hardware transactional memory
     // If the core is in transactional mode or if the request is HtmCMD
@@ -505,6 +522,11 @@ TimingSimpleCPU::handleWritePacket()
     SimpleExecContext &t_info = *threadInfo[curThread];
     SimpleThread* thread = t_info.thread;
 
+    DPRINTF(SimpleCPU, "Issuing access to memory hierarchy to addr: %#x, PC: %#x, cycle: %s\n",
+          dcache_pkt->getAddr(), dcache_pkt->req->getPC(), curCycle());
+
+    dcache_pkt->issuedCycle = curCycle();
+
     const RequestPtr &req = dcache_pkt->req;
     if (req->isLocalAccess()) {
         Cycles delay = req->localAccessor(thread->getTC(), dcache_pkt);
@@ -702,7 +724,7 @@ TimingSimpleCPU::fetch()
         ifetch_req->taskId(taskId());
         ifetch_req->setContext(thread->contextId());
         setupFetchRequest(ifetch_req);
-        DPRINTF(SimpleCPU, "Translating address %#x\n", ifetch_req->getVaddr());
+        DPRINTF(SimpleCPU, "Translating address %#x, PC: %#x\n", ifetch_req->getVaddr(), ifetch_req->getPC());
         thread->mmu->translateTiming(ifetch_req, thread->getTC(),
                 &fetchTranslation, BaseMMU::Execute);
     } else {
@@ -907,6 +929,11 @@ bool
 TimingSimpleCPU::IcachePort::recvTimingResp(PacketPtr pkt)
 {
     DPRINTF(SimpleCPU, "Received fetch response %#x\n", pkt->getAddr());
+
+    if (pkt->req->reqInROI) {
+      DPRINTF(SimpleCPU, "ROI Icache Received load/store response for addr: %#x, PC: %#x\n",
+          pkt->getAddr(), pkt->req->getPC());
+    }
 
     // hardware transactional memory
     // Currently, there is no support for tracking instruction fetches
@@ -1138,6 +1165,20 @@ bool
 TimingSimpleCPU::DcachePort::recvTimingResp(PacketPtr pkt)
 {
     DPRINTF(SimpleCPU, "Received load/store response %#x\n", pkt->getAddr());
+    DPRINTF(SimpleCPU, "Received data for access to addr: %#x, PC: %#x, cycle: %s\n",
+        pkt->getAddr(), pkt->req->getPC(), cpu->curCycle());
+
+    if (pkt->req->reqInROI) {
+      pkt->completeCycle = cpu->curCycle();
+      Cycles totCycle = cpu->curCycle() - pkt->issuedCycle;
+      DPRINTF(SimpleCPU, "ROI Dcache Received load/store response for addr: %#x, PC: %#x, \
+          %s, %s, %s\n",
+          pkt->getAddr(), pkt->req->getPC(), pkt->issuedCycle, pkt->completeCycle, totCycle);
+
+      cpu->system->logInfo("hhuuuuuu", pkt->getAddr(), pkt->req->getPC(), pkt->issuedCycle,
+                           cpu->cyclesToTicks(pkt->issuedCycle), pkt->completeCycle,
+                           cpu->cyclesToTicks(pkt->completeCycle), totCycle, cpu->cpuId());
+    }
 
     // The timing CPU is not really ticked, instead it relies on the
     // memory system (fetch and load/store) to set the pace.

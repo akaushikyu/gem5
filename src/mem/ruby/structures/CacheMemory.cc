@@ -103,7 +103,12 @@ CacheMemory::setRubySystem(RubySystem* rs)
 void
 CacheMemory::init()
 {
-    assert(m_block_size != 0);
+    //assert(m_block_size != 0);
+    // ZCLLC support
+    if (m_block_size == 0) {
+      // hardcode
+      m_block_size = 64;
+    }
     m_cache_num_sets = (m_cache_size / m_cache_assoc) / m_block_size;
     assert(m_cache_num_sets > 1);
     m_cache_num_set_bits = floorLog2(m_cache_num_sets);
@@ -297,7 +302,13 @@ CacheMemory::allocate(Addr address, AbstractCacheEntry *entry)
     DPRINTF(RubyCache, "allocating address: %#x\n", address);
 
     entry->initBlockSize(m_block_size);
+#if defined (ZCLLC)
+    // [FIXME]
+    // do nothing for set ruby system...
+#else
     entry->setRubySystem(m_ruby_system);
+#endif
+
 
     // Find the first open slot
     int64_t cacheSet = addressToCacheSet(address);

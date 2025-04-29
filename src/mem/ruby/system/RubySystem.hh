@@ -61,6 +61,7 @@ namespace ruby
 class Network;
 class AbstractController;
 
+// This causes diamond of death inheritance issue
 class RubySystem : public ClockedObject
 {
   public:
@@ -111,12 +112,12 @@ class RubySystem : public ClockedObject
     void registerMachineID(const MachineID& mach_id, Network* network);
     void registerRequestorIDs();
 
-    bool eventQueueEmpty() { return eventq->empty(); }
+    bool eventQueueEmpty() { return ClockedObject::eventq->empty(); }
     void enqueueRubyEvent(Tick tick)
     {
         auto e = new EventFunctionWrapper(
             [this]{ processRubyEvent(); }, "RubyEvent");
-        schedule(e, tick);
+        ClockedObject::schedule(e, tick);
     }
 
     const ProtocolInfo& getProtocolInfo() { return *protocolInfo; }

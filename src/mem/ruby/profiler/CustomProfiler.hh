@@ -5,6 +5,7 @@
 #include "params/CustomProfiler.hh"
 #include "sim/sim_object.hh"
 
+
 namespace gem5
 {
 
@@ -16,6 +17,7 @@ class CustomProfiler : public SimObject
     public:
         typedef CustomProfilerParams Params;
         CustomProfiler(const Params &p);
+
 
     protected:
         struct CustomProfilerStats : public statistics::Group
@@ -34,10 +36,12 @@ class CustomProfiler : public SimObject
             statistics::Scalar m_num_back_invalidation_wb;
             statistics::Scalar m_num_put_request;
             statistics::Histogram m_mem_latency_hist;
+            statistics::Histogram m_e2e_latency_hist;
+            statistics::Scalar m_wcl_access_time;
         } customProfilerStats;
 
     public:
-        // These function increments the associated statistics counter by one 
+        // These function increments the associated statistics counter by one
         // each time they are called
         void profileGetRequest();
         void profileL1Hit();
@@ -51,6 +55,7 @@ class CustomProfiler : public SimObject
         void profileBackInvalidationWB();
         void profilePutRequest();
         void profileMemLatency(Cycles latency);
+        void profileE2ELatency(Cycles endCycle, Cycles beginCycle);
 };
 
 

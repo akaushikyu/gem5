@@ -651,7 +651,7 @@ SyscallDescTable<SEWorkload::SyscallABI64> EmuLinux::syscallDescs64 = {
     { 119,  "sched_setscheduler" },
     { 120,  "sched_getscheduler" },
     { 121,  "sched_getparam" },
-    { 122,  "sched_setaffinity" },
+    { 122,  "sched_setaffinity", ignoreWarnOnceFunc },
     { 123,  "sched_getaffinity", schedGetaffinityFunc<RiscvLinux64> },
     { 124,  "sched_yield", ignoreWarnOnceFunc },
     { 125,  "sched_get_priority_max" },

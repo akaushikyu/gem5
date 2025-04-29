@@ -52,8 +52,11 @@ python_class_map = {
     "std::string": "String",
     "bool": "Bool",
     "CacheMemory": "RubyCache",
+    "XYZCacheMemory": "XYZCache",
+    "XYZStatsObject": "XYZStatsObject",
     "WireBuffer": "RubyWireBuffer",
     "Sequencer": "RubySequencer",
+    "Switch": "Switch",
     "HTMSequencer": "RubyHTMSequencer",
     "GPUCoalescer": "RubyGPUCoalescer",
     "VIPERCoalescer": "VIPERCoalescer",
@@ -66,7 +69,7 @@ python_class_map = {
     "prefetch::Base": "BasePrefetcher",
     "Cycles": "Cycles",
     "Addr": "Addr",
-    "CustomProfiler":"CustomProfiler",
+    "CustomProfiler": "CustomProfiler",
 }
 
 

@@ -1,0 +1,601 @@
+
+machine(MachineType:L0Cache, "LC_MSI cache")
+  : Sequencer* sequencer;
+    CacheMemory *ICache;
+    CacheMemory *DCache;
+    bool send_evictions;
+    XYZStatsObject *xyzStatsObject;
+
+    MessageBuffer * requestToL1, network="To", virtual_network="4", vnet_type="prv_req";
+    MessageBuffer * forwardFromL1, network="From", virtual_network="4", vnet_type="prv_req";
+    MessageBuffer * responseFromL1, network="From", virtual_network="5", vnet_type="prv_resp";
+    MessageBuffer * responseToL1, network="To", virtual_network="5", vnet_type="prv_resp";
+
+    MessageBuffer * mandatoryQueue;
+{
+  state_declaration(State, desc="Cache states") {
+    I,      AccessPermission:Invalid, desc="Not present/Invalid";
+
+    // States moving out of I
+    IS_D,   AccessPermission:Busy,
+                desc="Invalid, moving to S, waiting for data";
+    IM_D,   AccessPermission:Busy,
+                desc="Invalid, moving to M, waiting for acks";
+
+    S,      AccessPermission:Read_Only,
+                desc="Shared. Read-only, other caches may have the block";
+
+    M,      AccessPermission:Read_Write,
+                desc="Modified. Read & write permissions. Owner of block";
+
+  }
+
+  enumeration(Event, desc="Cache events") {
+    // From the processor/sequencer/mandatory queue
+    Load,           desc="Load from processor";
+    Ifetch,           desc="Load from processor";
+    Store,          desc="Store from processor";
+    Stall,          desc="Stall...";
+
+    // Internal event (only triggered from processor requests)
+    Replacement,    desc="Triggered when block is chosen as victim";
+
+    // Forwarded request from other cache via dir on the forward network
+    Inv,            desc="Invalidate from the directory.";
+    PutAck,         desc="Response from directory after we issue a put. This must be on the fwd network to avoid deadlock.";
+
+    // Responses from directory
+    Data,  desc="Data from directory (acks = 0)";
+    ExData,  desc="Data from directory (acks = 0)";
+
+  }
+  structure(Entry, desc="Cache entry", interface="AbstractCacheEntry") {
+    State CacheState,        desc="cache state";
+    DataBlock DataBlk,       desc="Data in the block";
+  }
+
+  structure(TBE, desc="Entry for transient requests") {
+    State TBEState,         desc="State of block";
+    DataBlock DataBlk,      desc="Data for the block. Needed for MI_A";
+    int AcksOutstanding, default=0, desc="Number of acks left to receive.";
+  }
+  structure(TBETable, external="yes") {
+    TBE lookup(Addr);
+    void allocate(Addr);
+    void deallocate(Addr);
+    bool isPresent(Addr);
+    int cnt();
+  }
+  TBETable TBEs, template="<L0Cache_TBE>", constructor="m_number_of_TBEs";
+  Tick clockEdge();
+
+  void set_cache_entry(AbstractCacheEntry a);
+  void unset_cache_entry();
+  void set_tbe(TBE b);
+  void unset_tbe();
+  Tick cyclesToTicks(Cycles c);
+  Cycles ticksToCycles(Tick t);
+  void wakeUpBuffers(Addr a);
+  void wakeUpAllBuffers();
+  void heheheheh();
+
+  // void hehehe();
+  MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+
+  // Convenience function to look up the cache entry.
+  // Needs a pointer so it will be a reference and can be updated in actions
+  Entry getICacheEntry(Addr address), return_by_pointer="yes" {
+    Entry icache := static_cast(Entry, "pointer", ICache.lookup(address));
+    return icache;
+  }
+  Entry getDCacheEntry(Addr address), return_by_pointer="yes" {
+    Entry dcache := static_cast(Entry, "pointer", DCache.lookup(address));
+    return dcache;
+  }
+  Entry getCacheEntry(Addr address), return_by_pointer="yes" {
+    Entry icache := static_cast(Entry, "pointer",ICache.lookup(address));
+    Entry dcache := static_cast(Entry, "pointer",DCache.lookup(address));
+    if(is_valid(icache)) {
+        assert(is_invalid(dcache));
+        return icache;
+    } else {
+        return dcache;
+    }
+  }
+  Event mandatory_request_type_to_event(RubyRequestType type) {
+    if (type == RubyRequestType:LD) {
+      return Event:Load;
+    } else if (type == RubyRequestType:IFETCH) {
+      return Event:Ifetch;
+    } else if ((type == RubyRequestType:ST) || (type == RubyRequestType:ATOMIC)
+               || (type == RubyRequestType:Store_Conditional)) {
+      return Event:Store;
+    } else {
+      error("Invalid RubyRequestType");
+    }
+  }
+
+
+  // getState/setState/getAccessPermission/setAccessPermission/functionRead/Write almost never changes
+  State getState(TBE tbe, Entry cache_entry, Addr addr) {
+    // The TBE state will override the state in cache memory, if valid
+    if (is_valid(tbe)) { return tbe.TBEState; }
+    // Next, if the cache entry is valid, it holds the state
+    else if (is_valid(cache_entry)) { return cache_entry.CacheState; }
+    // If the block isn't present, then it's state must be I.
+    else { return State:I; }
+  }
+
+  void setState(TBE tbe, Entry cache_entry, Addr addr, State state) {
+    if (is_valid(tbe)) { tbe.TBEState := state; }
+    if (is_valid(cache_entry)) { cache_entry.CacheState := state; }
+  }
+
+  AccessPermission getAccessPermission(Addr addr) {
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+        return L0Cache_State_to_permission(tbe.TBEState);
+    }
+
+    Entry cache_entry := getCacheEntry(addr);
+    if(is_valid(cache_entry)) {
+        return L0Cache_State_to_permission(cache_entry.CacheState);
+    }
+
+    return AccessPermission:NotPresent;
+  }
+
+  void setAccessPermission(Entry cache_entry, Addr addr, State state) {
+      if (is_valid(cache_entry)) {
+          cache_entry.changePermission(L0Cache_State_to_permission(state));
+      }
+  }
+
+  void functionalRead(Addr addr, Packet *pkt) {
+      TBE tbe := TBEs[addr];
+      if(is_valid(tbe)) {
+          testAndRead(addr, tbe.DataBlk, pkt);
+      } else {
+          testAndRead(addr, getCacheEntry(addr).DataBlk, pkt);
+      }
+  }
+
+  int functionalWrite(Addr addr, Packet *pkt) {
+      int num_functional_writes := 0;
+
+      TBE tbe := TBEs[addr];
+      if(is_valid(tbe)) {
+          num_functional_writes := num_functional_writes +
+              testAndWrite(addr, tbe.DataBlk, pkt);
+          return num_functional_writes;
+      }
+
+      num_functional_writes := num_functional_writes +
+              testAndWrite(addr, getCacheEntry(addr).DataBlk, pkt);
+      return num_functional_writes;
+  }
+  out_port(request_out, RequestMsg, requestToL1);
+  out_port(response_out, ResponseMsg, responseToL1);
+
+  // in_port
+  in_port(response_in, ResponseMsg, responseFromL1) {
+      if (response_in.isReady(clockEdge())) {
+          peek(response_in, ResponseMsg) { // in_msg is implied
+                Entry cache_entry := getCacheEntry(in_msg.addr);
+                TBE tbe := TBEs[in_msg.addr];
+                assert(is_valid(tbe));
+
+                if (in_msg.Type == CoherenceResponseType:Data) {
+                    trigger(Event:Data, in_msg.addr, cache_entry,
+                            tbe);
+                } else if(in_msg.Type == CoherenceResponseType:ExData) {
+                    trigger(Event:ExData, in_msg.addr, cache_entry,
+                            tbe);
+                } else {
+                    error("Unexpected response from other cache");
+                }
+          }
+      }
+  }
+
+  in_port(forward_in, RequestMsg, forwardFromL1) {
+    if(forward_in.isReady(clockEdge())) {
+      peek(forward_in, RequestMsg, block_on="addr") {
+        Entry cache_entry := getCacheEntry(in_msg.addr);
+        TBE tbe := TBEs[in_msg.addr];
+
+        if (in_msg.Type == CoherenceRequestType:Inv) {
+            trigger(Event:Inv, in_msg.addr, cache_entry, tbe);
+        } else {
+            error("Unexpected forward message!");
+        }
+      }
+    }
+  }
+
+  in_port(mandatory_in, RubyRequest, mandatoryQueue) {
+    if(mandatory_in.isReady(clockEdge())) {
+      peek(mandatory_in, RubyRequest) {
+        // Should not trigger here
+        TBE tbe := TBEs[in_msg.LineAddress];
+        Entry cache_entry := getCacheEntry(in_msg.LineAddress);
+        if(TBEs.cnt() > 0) {
+            // only 1 outstanding request
+            // TODO: relax this constraint
+            trigger(Event:Stall, in_msg.LineAddress, cache_entry,
+                    tbe);
+        }
+        Entry Icache_entry := getICacheEntry(in_msg.LineAddress);
+        Entry Dcache_entry := getDCacheEntry(in_msg.LineAddress);
+        if(in_msg.Type == RubyRequestType:IFETCH) {
+            // INSTR access
+            if(is_valid(Icache_entry)) {
+                // hit
+                trigger(Event:Ifetch, in_msg.LineAddress, Icache_entry, tbe);
+            } else {
+                if(is_valid(Dcache_entry)) { // wrong
+                    trigger(Event:Replacement, in_msg.LineAddress, Dcache_entry, tbe);
+                }
+                if(ICache.cacheAvail(in_msg.LineAddress)) {
+                    // or miss
+                    trigger(Event:Ifetch, in_msg.LineAddress, Icache_entry, tbe);
+                } else {
+                    Addr addr := ICache.cacheProbe(in_msg.LineAddress);
+                    check_on_cache_probe(mandatory_in, addr);
+                    trigger(Event:Replacement, addr, getICacheEntry(addr), TBEs[addr]);
+                }
+            }
+        } else {
+            // Data access
+            if(is_valid(Dcache_entry)) {
+                trigger(
+                    mandatory_request_type_to_event(in_msg.Type),
+                        in_msg.LineAddress, Dcache_entry, tbe);
+            } else if(is_valid(Icache_entry)) {
+                trigger(Event:Replacement, in_msg.LineAddress, Icache_entry, tbe);
+            } else if(DCache.cacheAvail(in_msg.LineAddress)) {
+                trigger(
+                    mandatory_request_type_to_event(in_msg.Type),
+                        in_msg.LineAddress, Dcache_entry, tbe);
+            } else {
+                // victim
+                Addr addr := DCache.cacheProbe(in_msg.LineAddress);
+                check_on_cache_probe(mandatory_in, addr);
+                trigger(Event:Replacement, addr, getDCacheEntry(addr), TBEs[addr]);
+            }
+        }
+      }
+    }
+  }
+
+  action(sendGetS, 'gS', desc="Send GetS to the directory") {
+    enqueue(request_out, RequestMsg, 1) {
+      // address, cache_entry, tbe
+      out_msg.addr := address;
+      out_msg.Type := CoherenceRequestType:GetS;
+      // out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
+      out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+      out_msg.MessageSize := MessageSizeType:Control;
+      out_msg.Requestor := machineID;
+      out_msg.is_reordered := false;
+    }
+  }
+  action(sendGetM, "gM", desc="Send GetM to the directory") {
+    enqueue(request_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:GetM;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.MessageSize := MessageSizeType:Control;
+        out_msg.Requestor := machineID;
+        out_msg.is_reordered := false;
+    }
+  }
+
+  action(sendPutS, "pS", desc="Send PutS to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(request_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:PutS;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.MessageSize := MessageSizeType:Control;
+        out_msg.Requestor := machineID;
+        out_msg.is_reordered := false;
+      }
+  }
+
+  action(sendPutM, "pM", desc="Send putM+data to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(request_out, RequestMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceRequestType:PutM;
+          out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+          out_msg.DataBlk := cache_entry.DataBlk;
+          out_msg.MessageSize := MessageSizeType:Data;
+          out_msg.Requestor := machineID;
+          out_msg.is_reordered := false;
+      }
+  }
+  action(sendWBData, "sWB", desc="Send putM+data to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(response_out, ResponseMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceResponseType:Data;
+          out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+          out_msg.DataBlk := cache_entry.DataBlk;
+          out_msg.MessageSize := MessageSizeType:Data;
+      }
+  }
+  action(sendCacheDataToReq, "cdR", desc="Send cache data to requestor") {
+    assert(is_valid(cache_entry));
+    // in_message & out_message
+    peek(forward_in, RequestMsg) {
+        enqueue(response_out, ResponseMsg, 1) {
+            out_msg.addr := address;
+            out_msg.Type := CoherenceResponseType:Data;
+            out_msg.Destination.add(in_msg.Requestor);
+            out_msg.DataBlk := cache_entry.DataBlk;
+            out_msg.MessageSize := MessageSizeType:Data;
+            out_msg.Sender := machineID;
+        }
+    }
+  }
+  action(sendCacheDataToDir, "cdD", desc="Send the cache data to the dir") {
+    enqueue(response_out, ResponseMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceResponseType:Data;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.DataBlk := cache_entry.DataBlk;
+        out_msg.MessageSize := MessageSizeType:Data;
+        out_msg.Sender := machineID;
+    }
+  }
+
+  action(loadHit, "Lh", desc="Load hit") {
+    assert(is_valid(cache_entry));
+    if (DCache.isTagPresent(address)) {
+        DCache.setMRU(cache_entry);
+    } else {
+        ICache.setMRU(cache_entry);
+    }
+    DPRINTF(RubySlicc, "%#x: cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+    sequencer.readCallback(address, cache_entry.DataBlk, false);
+  }
+
+
+  action(externalLoadHit, "xLh", desc="External load hit (was a miss)") {
+    assert(is_valid(cache_entry));
+    peek(response_in, ResponseMsg) { // this is from the directory
+        if (DCache.isTagPresent(address)) {
+            DCache.setMRU(cache_entry);
+        } else {
+            ICache.setMRU(cache_entry);
+        }
+        // Forward the type of machine that responded to this request
+        // E.g., another cache or the directory. This is used for tracking
+        // statistics.
+        DPRINTF(RubySlicc, "%#x: cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+        sequencer.readCallback(address, cache_entry.DataBlk, true,
+                               machineIDToMachineType(in_msg.Sender));
+    }
+  }
+  action(storeHit, "Sh", desc="Store hit") {
+    assert(is_valid(cache_entry));
+    DCache.setMRU(cache_entry);
+    // The same as the read callback above.
+    DPRINTF(RubySlicc, "%#x: before cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+    sequencer.writeCallback(address, cache_entry.DataBlk, false);
+    DPRINTF(RubySlicc, "%#x: after cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+}
+
+  action(externalStoreHit, "xSh", desc="External store hit (was a miss)") {
+      assert(is_valid(cache_entry));
+      peek(response_in, ResponseMsg) {
+          DCache.setMRU(cache_entry);
+          DPRINTF(RubySlicc, "%#x: before cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+          sequencer.writeCallback(address, cache_entry.DataBlk, true,
+                                // Note: this could be the last ack.
+                                machineIDToMachineType(in_msg.Sender));
+          DPRINTF(RubySlicc, "%#x: after cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+      }
+  }
+
+  action(forwardEviction, "e", desc="sends eviction notification to CPU") {
+    if (send_evictions) {
+        sequencer.evictionCallback(address);
+    }
+  }
+  action(allocateICacheBlock, "ai", desc="Allocate a cache block") {
+    assert(is_invalid(cache_entry));
+    assert(ICache.cacheAvail(address));
+    set_cache_entry(ICache.allocate(address, new Entry));
+  }
+  action(allocateDCacheBlock, "ad", desc="Allocate a cache block") {
+    assert(is_invalid(cache_entry));
+    assert(DCache.cacheAvail(address));
+    set_cache_entry(DCache.allocate(address, new Entry));
+  }
+
+  action(deallocateCacheBlock, "d", desc="Deallocate a cache block") {
+    assert(is_valid(cache_entry));
+    // clear the cache_entry variable (now it's invalid)
+    if (DCache.isTagPresent(address)) {
+      DCache.deallocate(address);
+    } else {
+      ICache.deallocate(address);
+    }
+    unset_cache_entry();
+  }
+
+  action(writeDataToCache, "wd", desc="Write data to the cache") {
+    peek(response_in, ResponseMsg) {
+        assert(is_valid(cache_entry));
+        cache_entry.DataBlk := in_msg.DataBlk;
+    }
+  }
+  action(allocateTBE, "aT", desc="Allocate TBE") {
+    assert(is_invalid(tbe));
+    TBEs.allocate(address);
+    // this updates the tbe variable for other actions
+    set_tbe(TBEs[address]);
+  }
+
+  action(deallocateTBE, "dT", desc="Deallocate TBE") {
+      assert(is_valid(tbe));
+      TBEs.deallocate(address);
+      // this makes the tbe variable invalid
+      unset_tbe();
+  }
+
+  action(copyDataFromCacheToTBE, "Dct", desc="Copy data from cache to TBE") {
+      assert(is_valid(cache_entry));
+      assert(is_valid(tbe));
+      tbe.DataBlk := cache_entry.DataBlk;
+  }
+
+  action(popMandatoryQueue, "pQ", desc="Pop the mandatory queue") {
+    mandatory_in.dequeue(clockEdge());
+  }
+
+  action(popResponseQueue, "pR", desc="Pop the response queue") {
+      response_in.dequeue(clockEdge());
+  }
+
+  action(popForwardQueue, "pF", desc="Pop the forward queue") {
+      forward_in.dequeue(clockEdge());
+  }
+
+  action(stall, "z", desc="Stall the incoming request") {
+    peek(mandatory_in, RubyRequest) {
+        Addr a := in_msg.LineAddress;
+        // Addr a := in_msg.PhysicalAddress;
+        stall_and_wait(mandatory_in, a);
+    }
+  }
+  action(stall_fwd, "zfwd", desc="Stall forward") {
+    stall_and_wait(forward_in, address);
+  }
+
+  action(kd_wakeUpDependents, "kd", desc="Wake-up dependents") {
+    wakeUpAllBuffers();
+    // wakeUpAllBuffers(address);
+  }
+  action(tic, "dtic", desc="Start timing") {
+    if(TBEs.cnt() == 0) {
+        xyzStatsObject.tic();
+    }
+  }
+  action(toc, "dtoc", desc="Start timing") {
+    xyzStatsObject.toc();
+  }
+  transition(I, Load, IS_D) {
+    tic;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetS;
+    popMandatoryQueue;
+  }
+  transition(I, Ifetch, IS_D) {
+    tic;
+    allocateICacheBlock;
+    allocateTBE;
+    sendGetS;
+    popMandatoryQueue;
+  }
+  transition(I, Store, IM_D) {
+    tic;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetM;
+    popMandatoryQueue;
+  }
+
+  transition(IS_D, {Load, Store, Replacement}) {
+    stall;
+  }
+  transition({IS_D, IM_D}, Inv) {
+    stall_fwd;
+  }
+  transition(IS_D, Data, S) {
+    toc;
+        writeDataToCache;
+        deallocateTBE;
+        externalLoadHit;
+        popResponseQueue;
+    kd_wakeUpDependents;
+  }
+  transition(IS_D, ExData, M) {
+    toc;
+        writeDataToCache;
+        deallocateTBE;
+        externalLoadHit;
+        popResponseQueue;
+    kd_wakeUpDependents;
+  }
+
+
+  // transition({IM_AD, IM_A}, {Load, Store, Replacement}) {
+  //   stall;
+  // }
+
+  transition(IM_D, Data, M) {
+    toc;
+      writeDataToCache;
+      deallocateTBE;
+      externalStoreHit;
+      popResponseQueue;
+    kd_wakeUpDependents;
+  }
+
+  transition({S, M}, {Load, Ifetch}) {
+      loadHit;
+      popMandatoryQueue;
+  }
+
+  transition(S, Store, IM_D) {
+    tic;
+      deallocateCacheBlock;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+  }
+
+  transition(S, Replacement, I) {
+      tic;
+      deallocateCacheBlock;
+      forwardEviction;
+      kd_wakeUpDependents;
+  }
+
+  transition(M, Replacement, I) {
+    tic;
+    sendPutM;
+    deallocateCacheBlock;
+    forwardEviction;
+  }
+
+  transition(M, Inv, I) {
+    sendWBData;
+    deallocateCacheBlock;
+    popForwardQueue;
+    forwardEviction;
+  }
+
+  transition(S, Inv, I) {
+      deallocateCacheBlock;
+      forwardEviction;
+      popForwardQueue;
+  }
+  transition(I, Inv) {
+    popForwardQueue;
+  }
+
+  transition(M, Store) {
+      storeHit;
+      popMandatoryQueue;
+  }
+
+  transition({I,M,S}, Stall) {
+    stall;
+  }
+}

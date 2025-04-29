@@ -211,6 +211,9 @@ System::System(const Params &p)
     // Set back pointers to the system in all memories
     for (int x = 0; x < params().memories.size(); x++)
         params().memories[x]->system(this);
+
+    // open log file
+    logFile.open ("log.csv");
 }
 
 System::~System()
@@ -374,6 +377,15 @@ System::regStats()
 }
 
 void
+System::workItemBegin(uint32_t tid, uint32_t workid)
+{
+  DPRINTF(WorkItems, "Work item begin: %d\t%d\t%lld\n", tid, workid, curTick());
+  std::pair<uint32_t, uint32_t> p(tid, workid);
+  lastWorkItemStarted[p] = curTick();
+  workBegin = true;
+}
+
+void
 System::workItemEnd(uint32_t tid, uint32_t workid)
 {
     std::pair<uint32_t,uint32_t> p(tid, workid);
@@ -388,6 +400,7 @@ System::workItemEnd(uint32_t tid, uint32_t workid)
 
     workItemStats[workid]->sample(samp);
     lastWorkItemStarted.erase(p);
+    workBegin = false;
 }
 
 bool
@@ -530,6 +543,25 @@ System::getRequestorName(RequestorID requestor_id)
 
     const auto& requestor_info = requestors[requestor_id];
     return requestor_info.req_name;
+}
+
+// variadic function with arbit # of args
+void
+System::logInfo(const char *fmt...) {
+  va_list args;
+  va_start(args, fmt);
+
+  while (*fmt != '\0') {
+    if (*fmt == 'u') {
+      logFile << va_arg(args, uint64_t) << ",";
+    } else if (*fmt == 'h') {
+      logFile << std::hex << va_arg(args, int) << std::dec <<",";
+    } else if (*fmt == 's') {
+      logFile << va_arg(args, std::string) <<",";
+    }
+    fmt++;
+  }
+  logFile << "\n";
 }
 
 } // namespace gem5

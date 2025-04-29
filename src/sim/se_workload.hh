@@ -78,7 +78,9 @@ class SEWorkload : public Workload
     {
         // This object represents the OS, not the individual processes running
         // within it.
-        panic("No workload symbol table for syscall emulation mode.");
+        // panic("No workload symbol table for syscall emulation mode.");
+        // We are using insertSymbol in SE mode. So, return true if we this function call in SE mode.
+        return true;
     }
 
     void serialize(CheckpointOut &cp) const override;

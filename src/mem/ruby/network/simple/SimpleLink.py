@@ -99,3 +99,4 @@ class SimpleIntLink(BasicIntLink):
                 ]
 
         self.buffers = buffers
+        return buffers

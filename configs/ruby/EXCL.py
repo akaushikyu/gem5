@@ -1,11 +1,15 @@
 import math
+import re
+
 import m5
+from m5.defines import buildEnv
 from m5.objects import *
 from m5.util import convert
-from m5.defines import buildEnv
-from .Ruby import create_topology
-from .Ruby import send_evicts
-import re
+
+from .Ruby import (
+    create_topology,
+    send_evicts,
+)
 
 
 def define_options(parser):
@@ -20,32 +24,24 @@ def define_options(parser):
         default=l1_latency,
     )
 
-    parser.add_argument(
-        "--l2-latency",
-        type=int,
-        default=l2_latency
-    )
+    parser.add_argument("--l2-latency", type=int, default=l2_latency)
 
     # TDM slot width is the request bus slot width
     parser.add_argument(
         "--tdm-slot-width",
         type=int,
         default=tdm_slot_width,
-        help="TDM slot width used in TDM arbitration in the request bus"
+        help="TDM slot width used in TDM arbitration in the request bus",
     )
 
     parser.add_argument(
         "--resp-bus-slot-width",
         type=int,
         default=resp_bus_slot_width,
-        help="The number of busy cycles to transmit a response in the response bus"
+        help="The number of busy cycles to transmit a response in the response bus",
     )
 
-    parser.add_argument(
-        "--num-l2-banks",
-        type=int,
-        default=8
-    )
+    parser.add_argument("--num-l2-banks", type=int, default=8)
 
 
 def create_system(
@@ -72,7 +68,7 @@ def create_system(
 
     options.topology = "SnoopingBus"
     options.network = "simple"
-    
+
     if options.num_cpus < 1:
         fatal("This script requires at least one cpu")
 
@@ -81,7 +77,7 @@ def create_system(
 
     num_llc_banks = options.num_l2_banks
     llc_size_in_bytes = convert.toMemorySize(options.l2_size)
-    llc_bank_size = f'{int(llc_size_in_bytes / num_llc_banks)}B'
+    llc_bank_size = f"{int(llc_size_in_bytes / num_llc_banks)}B"
 
     # To achieve short switch latency in ruby network, the ruby clock frequency is double of the cpu clock frequency.
     # Thus, all the timing parameters in unit of clock cycle in ruby network must be doubled to account for this change.
@@ -89,7 +85,7 @@ def create_system(
     options.l2_latency = options.l2_latency * 2
     options.tdm_slot_width = options.tdm_slot_width * 2
     options.resp_bus_slot_width = options.resp_bus_slot_width * 2
-    
+
     cpu_sequencers = []
     l1_cntrl_nodes = []
 
@@ -97,22 +93,22 @@ def create_system(
     l2_bits = int(math.log(num_llc_banks, 2))
 
     profiler = CustomProfiler()
- 
+
     # Create L1 cache controller
     for i in range(options.num_cpus):
 
         l1i_cache = RubyCache(
-            size=options.l1i_size, 
+            size=options.l1i_size,
             assoc=options.l1i_assoc,
             start_index_bit=block_size_bits,
-            is_icache = True
+            is_icache=True,
         )
 
         l1d_cache = RubyCache(
-            size=options.l1d_size, 
-            assoc=options.l1d_assoc, 
+            size=options.l1d_size,
+            assoc=options.l1d_assoc,
             start_index_bit=block_size_bits,
-            is_icache = False
+            is_icache=False,
         )
 
         clk_domain = ruby_system.clk_domain
@@ -132,14 +128,14 @@ def create_system(
             number_of_TBEs=1,
             profiler=profiler,
         )
-        
+
         # Create sequencer
         cpu_seq = RubySequencer(
             version=i,
             dcache=l1d_cache,
             clk_domain=clk_domain,
             ruby_system=ruby_system,
-            max_outstanding_requests=1
+            max_outstanding_requests=1,
         )
 
         # Set sequencer in L1 controller
@@ -154,7 +150,9 @@ def create_system(
         # mandatory queue
         l1_cntrl.mandatoryQueue = MessageBuffer()
         # internal replacement trigger queue
-        l1_cntrl.triggerQueue = MessageBuffer(randomization='disabled', allow_zero_latency=True)
+        l1_cntrl.triggerQueue = MessageBuffer(
+            randomization="disabled", allow_zero_latency=True
+        )
         # In ports
         l1_cntrl.busGrantIn = MessageBuffer(ordered=True)
         l1_cntrl.busGrantIn.in_port = ruby_system.network.out_port
@@ -170,34 +168,33 @@ def create_system(
         l1_cntrl.responseOut = MessageBuffer(ordered=False)
         l1_cntrl.responseOut.out_port = ruby_system.network.in_port
 
-
     # Create L2 caches (LLC)
     l2_cntrl_nodes = []
     l2_index_start = block_size_bits + l2_bits
     r = system.mem_ranges[0]
     for i in range(num_llc_banks):
         cache = RubyCache(
-            size=llc_bank_size, 
-            assoc=options.l2_assoc, 
+            size=llc_bank_size,
+            assoc=options.l2_assoc,
             start_index_bit=l2_index_start,
             dataArrayBanks=1,
             tagArrayBanks=1,
             dataAccessLatency=options.l2_latency,
             tagAccessLatency=options.l2_latency,
             resourceStalls=True,
-            replacement_policy=FIFORP()
+            replacement_policy=FIFORP(),
         )
         dir_memory = RubyDirectoryMemory(
             block_size=ruby_system.block_size_bytes
         )
         dir_memory.addr_ranges = [
             m5.objects.AddrRange(
-                r.start, 
-                size=r.size(), 
-                intlvHighBit=block_size_bits+l2_bits-1,
+                r.start,
+                size=r.size(),
+                intlvHighBit=block_size_bits + l2_bits - 1,
                 xorHighBit=0,
                 intlvBits=l2_bits,
-                intlvMatch=i
+                intlvMatch=i,
             )
         ]
         l2_cntrl = L2Cache_Controller(
@@ -240,9 +237,7 @@ def create_system(
     )
 
     # create directory
-    dir_memory = RubyDirectoryMemory(
-        block_size=ruby_system.block_size_bytes
-    )
+    dir_memory = RubyDirectoryMemory(block_size=ruby_system.block_size_bytes)
     dir_cntrl = Directory_Controller(
         version=0,
         directory=dir_memory,
@@ -266,13 +261,11 @@ def create_system(
     dir_cntrl.requestToMemory = MessageBuffer()
     dir_cntrl.responseFromMemory = MessageBuffer()
 
-    all_cntrls = (
-        l1_cntrl_nodes + l2_cntrl_nodes + [dir_cntrl]
-    )
+    all_cntrls = l1_cntrl_nodes + l2_cntrl_nodes + [dir_cntrl]
 
     if full_system:
         fatal("This script is missing full system support now")
-    
+
     ruby_system.network.number_of_virtual_networks = 5
     ruby_system.network.endpoint_bandwidth = 1000000
     topology = create_topology(all_cntrls, options)

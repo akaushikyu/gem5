@@ -326,6 +326,11 @@ getRequestorID(RequestPtr req)
     return req->requestorId();
 }
 
+// ZCLLC helper
+inline int getCurSlotOwnerHelper(Cycles c, int slot_width, int nCore) {
+  return (c / slot_width) % nCore;
+}
+
 } // namespace ruby
 } // namespace gem5
 

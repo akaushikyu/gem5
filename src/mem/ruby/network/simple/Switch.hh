@@ -111,6 +111,13 @@ class Switch : public BasicRouter
     uint32_t functionalWrite(Packet *);
 
     BaseRoutingUnit& getRoutingUnit() { return m_routing_unit; }
+#if defined (ZCLLC)
+    void markLLCDone();
+    void markLLCDone(bool waitForData);
+    void markLLCDone(Cycles delay);
+    int getROCCount(int set);
+    void markTransactionDone();
+#endif
 
   private:
     // Private copy constructor and assignment operator
@@ -129,6 +136,9 @@ class Switch : public BasicRouter
     unsigned m_num_connected_buffers;
     std::vector<MessageBuffer*> m_port_buffers;
 
+    // For ZCLLC
+    int m_ncore;
+    bool m_roc;
 
   public:
     struct SwitchStats : public statistics::Group

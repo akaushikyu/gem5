@@ -58,8 +58,13 @@ using stl_helpers::operator<<;
 
 Switch::Switch(const Params &p)
   : BasicRouter(p),
-#ifdef SNOOPING_BUS
-    perfectSwitch(m_id, this, p.virt_nets, p.num_processor, p.tdm_slot_width, p.resp_bus_slot_width),
+#if defined(SNOOPING_BUS)
+    perfectSwitch(m_id, this, p.virt_nets, p.num_processor, p.tdm_slot_width,
+                  p.resp_bus_slot_width),
+#elif defined(ZCLLC)
+    perfectSwitch(m_id, this, p.virt_nets, p.ncore, p.enforce_roc, p.work_conserving,
+                  p.subslot_opt, p.split_bus, p.response_bus_latency, p.slot_width,
+                  p.llc_latency, p.shared),
 #else
     perfectSwitch(m_id, this, p.virt_nets),
 #endif
@@ -199,6 +204,13 @@ Switch::functionalRead(Packet *pkt)
         if (m_port_buffers[i]->functionalRead(pkt))
             return true;
     }
+#if defined (ZCLLC)
+  DPRINTF(ZCLLC_TDMSwitch, "Huh????? %s\n", *this);
+  for (unsigned int i = 0; i < m_port_buffers.size(); ++i) {
+    DPRINTF(ZCLLC_TDMSwitch, "Buffer: %s\n", *m_port_buffers[i]);
+  }
+  return false;
+#endif
     return false;
 }
 
@@ -223,6 +235,26 @@ Switch::functionalWrite(Packet *pkt)
     }
     return num_functional_writes;
 }
+
+#if defined (ZCLLC)
+void Switch::markLLCDone() {
+    this->perfectSwitch.markLLCDone();
+}
+void Switch::markLLCDone(bool wait_for_data) {
+    this->perfectSwitch.markLLCDone(wait_for_data);
+}
+void Switch::markLLCDone(Cycles delay) {
+    this->perfectSwitch.markLLCDone(delay);
+}
+
+void Switch::markTransactionDone() {
+    this->perfectSwitch.markTransactionDone();
+}
+
+int Switch::getROCCount(int set) {
+    return this->perfectSwitch.getROCCount(set);
+}
+#endif
 
 Switch::
 SwitchStats::SwitchStats(statistics::Group *parent)

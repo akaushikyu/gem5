@@ -1,0 +1,739 @@
+
+
+machine(MachineType:Directory, "Directory protocol")
+    :
+  DirectoryMemory * directory;
+  CacheMemory * cacheMemory;
+  XYZCacheMemory *xyzCacheMemory;
+  Cycles toMemLatency := 1;
+  int sum_prv_cores := 0;
+  int sum_prv_capacity := 0;
+MessageBuffer *forwardToCache, network = "To", virtual_network = "1",
+                               vnet_type = "forward";
+MessageBuffer *responseToCache, network = "To", virtual_network = "2",
+                                vnet_type = "response";
+MessageBuffer *requestFromCache, network = "From", virtual_network = "0",
+                                 vnet_type = "request";
+MessageBuffer *responseFromCache, network = "From", virtual_network = "2",
+                                  vnet_type = "response";
+// NOTE: peek from requestFromOrdered should only be processed if the request CAN be processed...
+// NOTE: the request sent to requestToOrder will be ordered in the PerfectTDMSwitch and will be serviced back later
+// NOTE: all memory request should be ordered even in the case of ZIV + ROC because a later reqeust can
+// Occupy a CRE
+MessageBuffer *requestToOrder, network = "To", virtual_network = "3",
+                                  vnet_type = "request";
+MessageBuffer *requestFromOrdered, network = "From", virtual_network = "3",
+                                  vnet_type = "request";
+MessageBuffer *requestToMemory;
+MessageBuffer *responseFromMemory;
+{
+  state_declaration(State, desc="Directory states",
+                  default="Directory_State_I") {
+      // Stable states.
+      // NOTE: These are "cache-centric" states like in Sorin et al.
+      // However, The access permissions are memory-centric.
+      I, AccessPermission:Read_Write,  desc="Invalid in the caches.";
+      S, AccessPermission:Read_Only,   desc="At least one cache has the blk";
+      M, AccessPermission:Invalid,     desc="A cache has the block in M";
+      LLCOnly, AccessPermission:Read_Write, desc="In LLC only";
+
+      // Transient states
+      S_D, AccessPermission:Busy,      desc="Moving to S, but need data";
+
+      // Waiting for data from memory
+      S_m, AccessPermission:Read_Write, desc="In S waiting for mem";
+      M_m, AccessPermission:Read_Write, desc="Moving to M waiting for mem";
+
+      // Waiting for write-ack from memory
+      MI_m, AccessPermission:Busy,       desc="Moving to I waiting for ack";
+      SS_m, AccessPermission:Busy,       desc="Moving to I waiting for ack";
+
+      // Added for replacement
+      S_A_A, AccessPermission:Busy, desc="Replacing shared line, blocking the whole cache";
+      M_A_A, AccessPermission:Busy, desc="Replacing shared line, blocking the whole cache";
+      I_I_Mem, AccessPermission:Busy, desc="Replacing shared line, blocking the whole cache";
+  }
+
+  enumeration(Event, desc="Directory events") {
+        // Data requests from the cache
+        GetS,         desc="Request for read-only data from cache";
+        GetM,         desc="Request for read-write data from cache";
+        Replacement,  desc="Triggered when block is chosen as victim";
+
+        // Writeback requests from the cache
+        PutSNotLast,  desc="PutS and the block has other sharers";
+        PutSLast,     desc="PutS and the block has no other sharers";
+        PutMOwner,    desc="Dirty data writeback from the owner";
+        PutMNonOwner, desc="Dirty data writeback from non-owner";
+
+        // Cache responses
+        Data,         desc="Response to fwd request with data";
+
+        // From Memory
+        MemData,      desc="Data from memory";
+        MemAck,       desc="Ack from memory that write is complete";
+
+        // Ordering
+        Order,        desc="Order what every request";
+        Unblock,      desc="Unblock something";
+    }
+
+    // For some reason it does not like the default case, we must add interface to make it pass by pointers
+    structure(TBE, desc="MSHR like requests", main="false") {
+        Addr addr,              desc="The replacement addr";
+        Addr orig_request_addr, desc="So that we can wakeup buffer later";
+        State TBEState,         desc="State of block";
+        DataBlock DataBlk,      desc="Data for the block. Needed for MI_A";
+        int AcksOutstanding, default=0, desc="Number of acks left to receive.";
+    }
+    // NOTE: the tag in the XYZCacheMemory is implemented as a fully associative array
+    structure(Entry, desc="...", interface="AbstractCacheEntry") {
+        State DirState,         desc="Directory state";
+        NetDest Sharers,        desc="Sharers for this block";
+        NetDest Owner,          desc="Owner of this block";
+        DataBlock DataBlk,       desc="Data in the block";
+        bool isDirty,           desc="Specify whether we really need to perform memory transaction";
+    }
+    // This should be indexed by the set address
+    structure(TBETable, external="yes") {
+        TBE lookup(Addr);
+        void allocate(Addr);
+        void deallocate(Addr);
+        bool isPresent(Addr);
+        int cnt();
+        void clr();
+    }
+    // No need for really using TBE, because a wb or a request won't be spanning multiple slots
+    // and we order all requests
+    TBETable TBEs, template="<Directory_TBE>", constructor="m_number_of_TBEs";
+
+
+    Tick clockEdge();
+
+    Entry getCacheEntry(Addr addr), return_by_pointer = "yes" {
+        Entry e := static_cast(Entry, "pointer", xyzCacheMemory[addr]);
+        return e;
+    }
+
+    void set_cache_entry(AbstractCacheEntry a);
+    void unset_cache_entry();
+    void set_tbe(TBE b);
+    void unset_tbe();
+    Tick cyclesToTicks(Cycles c);
+    Cycles curCycle();
+    Cycles ticksToCycles(Tick t);
+    void wakeUpBuffers(Addr a);
+    // RubySlicc_Util.hh
+    int getCurSlotOwnerHelper(Cycles c, int slot_width, int nCore);
+    int getCurSlotOwner() {
+
+        int owner := getCurSlotOwnerHelper(curCycle(), 128, 4);
+        return owner;
+    }
+
+  State getState(TBE tbe, Entry cache_entry, Addr addr) {
+      // TBE does not really play a role here
+      if(is_valid(cache_entry)) {
+          // This only happens if it is not in the TagCache
+          return cache_entry.DirState;
+      } else {
+          return State:I;
+      }
+  }
+
+
+  void setState(TBE tbe, Entry cache_entry, Addr addr, State state) {
+    assert(is_valid(cache_entry));
+    if (state == State:M) {
+        DPRINTF(RubySlicc, "Owner %s\n", cache_entry.Owner);
+        assert(cache_entry.Owner.count() == 1);
+        assert(cache_entry.Sharers.count() == 0);
+    }
+    cache_entry.DirState := state;
+    if (state == State:I)  {
+        assert(cache_entry.Owner.count() == 0);
+        assert(cache_entry.Sharers.count() == 0);
+    }
+  }
+
+  AccessPermission getAccessPermission(Addr addr) {
+      Entry e := getCacheEntry(addr);
+      if (is_valid(e)) {
+          return Directory_State_to_permission(e.DirState);
+      }
+    return AccessPermission:NotPresent;
+  }
+  void setAccessPermission(Entry cache_entry, Addr addr, State state) {
+      if (is_valid(cache_entry)) {
+          cache_entry.changePermission(Directory_State_to_permission(state));
+      }
+  }
+
+  void functionalRead(Addr addr, Packet *pkt) {
+    functionalMemoryRead(pkt);
+  }
+
+  int functionalWrite(Addr addr, Packet *pkt) {
+    if (functionalMemoryWrite(pkt)) {
+        return 1;
+    } else {
+        return 0;
+    }
+  }
+/*
+  void functionalRead(Addr addr, Packet *pkt) {
+    // functionalMemoryRead(pkt);
+    testAndRead(addr, getCacheEntry(addr).DataBlk, pkt);
+
+  }
+
+  int functionalWrite(Addr addr, Packet *pkt) {
+    int num_functional_writes := 0;
+    num_functional_writes := num_functional_writes + testAndWrite(addr, getCacheEntry(addr).DataBlk, pkt);
+    return num_functional_writes;
+  } */
+  out_port(forward_out, RequestMsg, forwardToCache);
+
+  out_port(response_out, ResponseMsg, responseToCache);
+  out_port(request_out_order, RequestMsg, requestToOrder);
+  out_port(memQueue_out, MemoryMsg, requestToMemory);
+
+
+  in_port(memQueue_in, MemoryMsg, responseFromMemory) {
+      if (memQueue_in.isReady(clockEdge())) {
+          peek(memQueue_in, MemoryMsg) {
+              DPRINTF(RubySlicc, "memQueue_in has something: %s\n", in_msg);
+              Entry e := getCacheEntry(in_msg.addr);
+              TBE tbe := TBEs[in_msg.addr];
+              if (in_msg.Type == MemoryRequestType:MEMORY_READ) {
+                  trigger(Event:MemData, in_msg.addr, e, tbe);
+              } else if (in_msg.Type == MemoryRequestType:MEMORY_WB) {
+                  trigger(Event:MemAck, in_msg.addr, e, tbe);
+              } else {
+                  error("Invalid message");
+              }
+          }
+      }
+  }
+
+  in_port(response_in, ResponseMsg, responseFromCache) {
+      if (response_in.isReady(clockEdge())) {
+          peek(response_in, ResponseMsg) {
+              Entry e := getCacheEntry(in_msg.addr);
+              TBE tbe := TBEs[in_msg.addr];
+              if (in_msg.Type == CoherenceResponseType:Data) {
+                  trigger(Event:Data, in_msg.addr, e, tbe);
+              } else {
+                  error("Unexpected message type.");
+              }
+          }
+      }
+  }
+  // this is slightly higher priority
+  in_port(request_in_order, RequestMsg, requestFromOrdered) {
+      if(request_in_order.isReady(clockEdge())) {
+          peek(request_in_order, RequestMsg) {
+              Entry e := getCacheEntry(in_msg.addr); // the line that is replaced
+              TBE tbe := TBEs[in_msg.addr]; // the (status of) line should only reside in the TBE now
+              // This is sent at the start of the slot to "unblock" the LLC from replacement
+              assert(is_valid(tbe));
+              assert(is_invalid(e));
+              // whatever request to give in
+              trigger(Event:Unblock, in_msg.addr, e, tbe);
+
+          }
+      }
+  }
+
+  in_port(request_in, RequestMsg, requestFromCache) {
+      if (request_in.isReady(clockEdge())) {
+          peek(request_in, RequestMsg) {
+              Entry e := getCacheEntry(in_msg.addr);
+              TBE tbe := TBEs[in_msg.addr];
+              // The tag cache must have enough space, the directory cache however does not ne
+              if(TBEs.cnt() > 0 && (in_msg.Type == CoherenceRequestType:GetS || in_msg.Type == CoherenceRequestType:GetM)) {
+                  // Requesting on a cache line that needs to be ordered
+                  trigger(Event:Order, in_msg.addr, e, tbe);
+              } else if(in_msg.Type == CoherenceRequestType:GetS || in_msg.Type == CoherenceRequestType:GetM) {
+                  if(is_invalid(e) && xyzCacheMemory.xyzCREAvail(in_msg.addr) == false) {
+                      // Should not be the case when vi is employed
+                      Addr victim_addr := xyzCacheMemory.xyzCacheProbe(in_msg.addr);
+                      Entry victim_entry := getCacheEntry(victim_addr);
+                      TBE victim_tbe := TBEs[victim_addr];
+                      // if vi enabled, replacement should not happen
+                      assert(xyzCacheMemory.vi_enabled() == false);
+                      trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
+                  } else {
+                      // trigger replacement
+                      if (in_msg.Type == CoherenceRequestType:GetS) {
+                          trigger(Event:GetS, in_msg.addr, e, tbe);
+                      } else if (in_msg.Type == CoherenceRequestType:GetM) {
+                          trigger(Event:GetM, in_msg.addr, e, tbe);
+                      } else {
+                          error("Unexpected Transition");
+                      }
+                  }
+              } else if (in_msg.Type == CoherenceRequestType:PutS) {
+                  assert(is_valid(e));
+                  // If there is only a single sharer (i.e., the requestor)
+                  if (e.Sharers.count() == 1) {
+                      assert(e.Sharers.isElement(in_msg.Requestor));
+                      // TODO: check for invariant
+                      trigger(Event:PutSLast, in_msg.addr, e, tbe);
+                  } else {
+                      trigger(Event:PutSNotLast, in_msg.addr, e, tbe);
+                  }
+              } else if (in_msg.Type == CoherenceRequestType:PutM) {
+                  assert(is_valid(e));
+                  if (e.Owner.isElement(in_msg.Requestor)) {
+                      // TODO: check for invariant
+                      trigger(Event:PutMOwner, in_msg.addr, e, tbe);
+                  } else {
+                      assert(false);
+                      trigger(Event:PutMNonOwner, in_msg.addr, e, tbe);
+                  }
+              } else {
+                  error("Unexpected message type.");
+              }
+          }
+      }
+  }
+
+  action(allocteROCTBE, 'aTBE', desc="Allocate tbe entry for RoC for current pending request") {
+      // setting the flags
+        // whatever
+        // note that this is the tbe for line to replace
+        assert(is_invalid(tbe));
+        TBEs.allocate(address);
+        set_tbe(TBEs[address]);
+  }
+
+
+  action(clearROCTBE, 'cTBE', desc="Allocate tbe entry for RoC for current pending request") {
+      // clearing the flag
+      assert(is_valid(tbe));
+      TBEs.deallocate(address);
+      assert(TBEs.cnt() == 1);
+      TBEs.clr();
+      unset_tbe();
+  }
+
+  action(fwdToOrder, "fwdOrd", desc="Send a request so that there is a Ack later to unblock the cache") {
+      assert(is_valid(cache_entry));
+
+    enqueue(request_out_order, RequestMsg) {
+        // the original request causing the replacement is blocking on the input
+        // the replacement order
+        out_msg.addr := address;
+        // nothing...
+        // out_msg.Type := CoherenceRequestType:Inv;
+        out_msg.MessageSize := MessageSizeType:Request_Control;
+    }
+  }
+
+  action(sendMemRead, "r", desc="Send a memory read request") {
+        peek(request_in, RequestMsg) {
+            // Send request through special memory request queue. At some
+            // point the response will be on the memory response queue.
+            // Like enqueue, this takes a latency for the request.
+            enqueue(memQueue_out, MemoryMsg, toMemLatency) {
+                out_msg.addr := address;
+                out_msg.Type := MemoryRequestType:MEMORY_READ;
+                out_msg.Sender := in_msg.Requestor;
+                out_msg.MessageSize := MessageSizeType:Request_Control;
+                out_msg.Len := 0;
+                DPRINTF(RubySlicc, "Reading memory for %#x\n", address);
+
+                DPRINTF(RubySlicc, "Out Msg: %s\n", out_msg);
+            }
+        }
+    }
+
+    action(sendDataToMem, "w", desc="Write data to memory") {
+        peek(request_in, RequestMsg) {
+            DPRINTF(RubySlicc, "Writing memory for %#x\n", address);
+            DPRINTF(RubySlicc, "Writing %s\n", in_msg.DataBlk);
+            enqueue(memQueue_out, MemoryMsg, toMemLatency) {
+                out_msg.addr := address;
+                out_msg.Type := MemoryRequestType:MEMORY_WB;
+                out_msg.Sender := in_msg.Requestor;
+                out_msg.MessageSize := MessageSizeType:Writeback_Data;
+                out_msg.DataBlk := in_msg.DataBlk;
+                out_msg.Len := 0;
+            }
+        }
+    }
+
+    action(sendRespDataToMem, "rw", desc="Write data to memory from resp") {
+        peek(response_in, ResponseMsg) {
+            DPRINTF(RubySlicc, "Writing memory for %#x\n", address);
+            DPRINTF(RubySlicc, "Writing %s\n", in_msg.DataBlk);
+            enqueue(memQueue_out, MemoryMsg, toMemLatency) {
+                out_msg.addr := address;
+                out_msg.Type := MemoryRequestType:MEMORY_WB;
+                out_msg.Sender := in_msg.Sender;
+                out_msg.MessageSize := MessageSizeType:Writeback_Data;
+                out_msg.DataBlk := in_msg.DataBlk;
+                out_msg.Len := 0;
+            }
+        }
+    }
+  action(addReqToSharers, "aS", desc="Add requestor to sharer list") {
+      peek(request_in, RequestMsg) {
+          sum_prv_cores := sum_prv_cores + 1;
+          xyzCacheMemory.addSharer(address);
+          cache_entry.Sharers.add(in_msg.Requestor);
+      }
+  }
+
+  action(setOwner, "sO", desc="Set the owner") {
+      peek(request_in, RequestMsg) {
+          sum_prv_cores := sum_prv_cores - cache_entry.Sharers.count() + 1;
+          xyzCacheMemory.markOwner(address);
+          cache_entry.Owner.add(in_msg.Requestor);
+      }
+  }
+
+  action(addOwnerToSharers, "oS", desc="Add the owner to sharers") {
+      error("Not supported");
+      assert(cache_entry.Owner.count() == 1);
+      cache_entry.Sharers.addNetDest(cache_entry.Owner);
+      xyzCacheMemory.addSharer(address);
+      sum_prv_cores := sum_prv_cores - 1 + cache_entry.Sharers.count();
+  }
+
+  action(removeReqFromSharers, "rS", desc="Remove requestor from sharers") {
+      peek(request_in, RequestMsg) {
+          xyzCacheMemory.removeSharer(address);
+          cache_entry.Sharers.remove(in_msg.Requestor);
+          sum_prv_cores := sum_prv_cores - 1;
+      }
+  }
+
+  action(clearSharers, "cS", desc="Clear the sharer list") {
+      sum_prv_cores := sum_prv_cores - cache_entry.Sharers.count();
+      xyzCacheMemory.clearSharer(address);
+      cache_entry.Sharers.clear();
+  }
+
+  action(clearOwner, "cO", desc="Clear the owner") {
+      sum_prv_cores := sum_prv_cores - 1;
+      xyzCacheMemory.clearSharer(address);
+      cache_entry.Owner.clear();
+  }
+
+  action(sendInvToSharers, "i", desc="Send invalidate to all sharers") {
+      // broadcast
+      peek(request_in, RequestMsg) {
+          enqueue(forward_out, RequestMsg, 1) {
+              out_msg.addr := address;
+              out_msg.Type := CoherenceRequestType:Inv;
+              out_msg.Requestor := in_msg.Requestor;
+              out_msg.Destination := cache_entry.Sharers;
+              out_msg.MessageSize := MessageSizeType:Control;
+          }
+      }
+  }
+  action(sendBIToSharers, "biS", desc="Send back-invalidation to all sharers") {
+      // broadcast
+    enqueue(forward_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:Inv;
+        out_msg.Requestor := machineID;
+        out_msg.Destination := cache_entry.Sharers;
+        out_msg.MessageSize := MessageSizeType:Control;
+    }
+  }
+  action(sendBIToOwner, "biO", desc="Send back-invalidation to owner") {
+      // they will return data
+    enqueue(forward_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:GetM;
+        out_msg.Requestor := machineID;
+        out_msg.Destination := cache_entry.Owner;
+        out_msg.MessageSize := MessageSizeType:Control;
+    }
+  }
+
+  action(sendFwdGetS, "fS", desc="Send forward getS to owner") {
+      assert(cache_entry.Owner.count() == 1);
+      peek(request_in, RequestMsg) {
+          enqueue(forward_out, RequestMsg, 1) {
+              out_msg.addr := address;
+              out_msg.Type := CoherenceRequestType:GetS;
+              out_msg.Requestor := in_msg.Requestor;
+              out_msg.Destination := cache_entry.Owner;
+              out_msg.MessageSize := MessageSizeType:Control;
+          }
+      }
+  }
+
+  action(sendFwdGetM, "fM", desc="Send forward getM to owner") {
+      assert(cache_entry.Owner.count() == 1);
+      peek(request_in, RequestMsg) {
+          enqueue(forward_out, RequestMsg, 1) {
+              out_msg.addr := address;
+              out_msg.Type := CoherenceRequestType:GetM;
+              out_msg.Requestor := in_msg.Requestor;
+              out_msg.Destination := cache_entry.Owner;
+              out_msg.MessageSize := MessageSizeType:Control;
+          }
+      }
+  }
+  action(sendDataToReq, "d", desc="Send data from memory to requestor. May need to send sharer number, too") {
+      peek(memQueue_in, MemoryMsg) {
+          enqueue(response_out, ResponseMsg, 1) {
+              out_msg.addr := address;
+              out_msg.Type := CoherenceResponseType:Data;
+              out_msg.Sender := machineID;
+              out_msg.Destination.add(in_msg.OriginalRequestorMachId);
+              out_msg.DataBlk := in_msg.DataBlk;
+              out_msg.MessageSize := MessageSizeType:Data;
+              DPRINTF(RubySlicc, "sendDataToReq Msg? %s", in_msg);
+              // Entry e := getDirectoryEntry(address);
+              // Only need to include acks if we are the owner.
+              if (cache_entry.Owner.isElement(in_msg.OriginalRequestorMachId)) {
+                  out_msg.Acks := cache_entry.Sharers.count();
+              } else {
+                  out_msg.Acks := 0;
+              }
+              assert(out_msg.Acks >= 0);
+          }
+      }
+  }
+
+  action(sendPutAck, "a", desc="Send the put ack") {
+      peek(request_in, RequestMsg) {
+          enqueue(forward_out, RequestMsg, 1) {
+              out_msg.addr := address;
+              out_msg.Type := CoherenceRequestType:PutAck;
+              out_msg.Requestor := machineID;
+              out_msg.Destination.add(in_msg.Requestor);
+              out_msg.MessageSize := MessageSizeType:Control;
+          }
+      }
+  }
+  action(popResponseQueue, "pR", desc="Pop the response queue") {
+    response_in.dequeue(clockEdge());
+  }
+
+  action(popRequestQueue, "pQ", desc="Pop the request queue") {
+      request_in.dequeue(clockEdge());
+  }
+
+  action(popMemQueue, "pM", desc="Pop the memory queue") {
+      memQueue_in.dequeue(clockEdge());
+  }
+
+  action(stall, "z", desc="Stall the incoming request") {
+      // Do nothing.
+  }
+
+
+  action(allocateCacheBlock, "aC", desc="Allocate a cache block") {
+    assert(is_invalid(cache_entry));
+    assert(xyzCacheMemory.xyzCREAvail(address));
+    set_cache_entry(xyzCacheMemory.allocate(address, new Entry));
+  }
+
+
+  action(deallocateCacheBlock, "dC", desc="Deallocate a cache block") {
+    assert(is_valid(cache_entry));
+    xyzCacheMemory.deallocate(address);
+    // clear the cache_entry variable (now it's invalid)
+    unset_cache_entry();
+  }
+
+
+  action(writeDataToCache, "wd", desc="Write data to the cache") {
+    peek(memQueue_in, MemoryMsg) {
+        assert(is_valid(cache_entry));
+        cache_entry.DataBlk := in_msg.DataBlk;
+    }
+  }
+
+  /* action(wakeupAndRetryRequest, 'wrt', desc="Wakeup and retry") {
+
+  } */
+
+  // Back-invalidations, should not exist for other stuff
+  // The following cases cannot be handled within a slot
+  /*
+  // immediate wb also eliminate the same scenario as  LC, so perhaps ok
+  // happens when a replacement in cache happens first, replacement in LLC happens next and then
+  // the cache replacement is broadcasted, won't affect the bound
+  transition(I, {PutSNotLast, PutSLast, PutMNonOwner}) {
+      sendPutAck;
+      popRequestQueue;
+  }
+
+  // only happens in system with back-invalidation (ROC/LLC partitioning)
+  transition(S, Replacement, S_A_A) {
+      allocteROCTBE;
+      fwdToOrder;
+      sendBIToSharers;
+  }
+
+  transition(S_A_A, InvAck) {
+      decrAcks;
+      popResponseQueue;
+  }
+  transition(S_A_A, LastInvAck, I) {
+      deallocateCacheBlock;
+      popRequestQueue;
+  }
+  transition(I, Unblock) {
+      // wakeupAndRetryRequest;
+      deallocateROCTBE; // <- this will unblock the buffer, if not we need to call wakeupBuffer
+  }
+
+  transition(M, Replacement, M_A_A) {
+      // some state that wait for both the replacement to complete and some state to wait
+      // for the ack to unblock the current process
+      allocteROCTBE;
+      fwdToOrder;
+      sendBIToOwner;
+  }
+
+  transition(M_A_A, Data, I_I_Mem) {
+      sendRespDataToMem;
+      popResponseQueue;
+  }
+
+  // Clean, then no need to put to memory
+  transition(LLCOnly, Replacement, I_I_Mem) {
+      allocteROCTBE;
+      fwdToOrder;
+      sendCacheBlockToMem;
+  }
+
+  transition(I_I_Mem, MemAck, I) {
+      deallocateCacheBlock;
+      popMemQueue;
+  }
+  */
+  // Can be
+  /*
+  transition(LLCOnly, GetS, S) {
+
+  }
+
+  transition(LLCOnly, GetM, M) {
+
+  }
+  */
+
+  // allocateROCTBE only used when doing replacement and request has to be ordered
+  transition(I, GetS, S_m) {
+      allocateCacheBlock;
+      sendMemRead;
+      addReqToSharers;
+      popRequestQueue;
+  }
+
+  transition(I, {PutSNotLast, PutSLast, PutMNonOwner}) {
+      sendPutAck;
+      popRequestQueue;
+  }
+
+  transition(S_m, MemData, S) {
+      sendDataToReq;
+      writeDataToCache;
+      popMemQueue;
+  }
+
+  transition(I, GetM, M_m) {
+      allocateCacheBlock;
+      allocteROCTBE;
+      sendMemRead;
+      setOwner;
+      popRequestQueue;
+  }
+
+  transition(M_m, MemData, M) {
+      sendDataToReq;
+      clearSharers; // NOTE: This isn't *required* in some cases.
+      popMemQueue;
+  }
+
+  transition(S, GetM, M_m) {
+      sendMemRead;
+      removeReqFromSharers;
+      sendInvToSharers;
+      setOwner;
+      popRequestQueue;
+  }
+
+  /*
+  transition({S, S_D, SS_m, S_m}, {PutSNotLast, PutMNonOwner}) {
+      removeReqFromSharers;
+      sendPutAck;
+      popRequestQueue;
+  }
+  */
+
+  /*
+  transition(S, PutSLast, I) { // TODO: To LLCOnly
+      removeReqFromSharers;
+      sendPutAck;
+      popRequestQueue;
+  }
+  */
+
+  transition(M, GetS, S_D) {
+      sendFwdGetS;
+      addReqToSharers;
+      addOwnerToSharers;
+      clearOwner;
+      popRequestQueue;
+  }
+
+  transition(M, GetM) {
+      sendFwdGetM;
+      clearOwner;
+      setOwner;
+      popRequestQueue;
+  }
+
+  transition({M, M_m, MI_m}, {PutSNotLast, PutSLast, PutMNonOwner}) {
+      sendPutAck;
+      popRequestQueue;
+  }
+
+  transition(M, PutMOwner, MI_m) {
+      // mark clean and create CRE (or Not?), like another event PutMOwnerCreateCRE
+      sendDataToMem;
+      clearOwner;
+      sendPutAck;
+      popRequestQueue;
+  }
+
+  transition(MI_m, MemAck, I) {
+      popMemQueue;
+  }
+
+  transition(S_D, {GetS, GetM}) {
+      stall;
+  }
+
+  transition(S_D, PutSLast) {
+      removeReqFromSharers;
+      sendPutAck;
+      popRequestQueue;
+  }
+  // should be within same slot
+  transition(S_D, Data, SS_m) {
+      sendRespDataToMem;
+      popResponseQueue;
+  }
+  // should be within same slot as the GetS
+  transition(SS_m, MemAck, S) {
+      popMemQueue;
+  }
+
+  // If we get another request for a block that's waiting on memory,
+  // stall that request.
+  transition({MI_m, SS_m, S_m, M_m}, {GetS, GetM}) {
+      stall;
+  }
+}

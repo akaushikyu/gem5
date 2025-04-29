@@ -133,3 +133,6 @@ MakeInclude('system/VIPERCoalescer.hh')
 MakeInclude('system/VIPERSequencer.hh')
 
 MakeInclude('profiler/CustomProfiler.hh')
+MakeInclude('structures/XYZCacheMemory.hh')
+MakeInclude('structures/XYZStatsObject.hh')
+MakeInclude('network/simple/Switch.hh')

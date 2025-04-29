@@ -36,6 +36,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from m5.defines import buildEnv
 from m5.objects.BasicRouter import BasicRouter
 from m5.objects.MessageBuffer import MessageBuffer
 from m5.objects.Network import RubyNetwork
@@ -126,6 +127,21 @@ class Switch(BasicRouter):
     routing_unit = Param.BaseRoutingUnit(
         WeightBased(adaptive_routing=False), "Routing strategy to be used"
     )
+
+    if buildEnv["PROTOCOL"] == "LC_MSI":
+        ncore = Param.Int(1, "Number of cores")
+        work_conserving = Param.Bool(
+            False, "Whether work-conserving RR is enabled"
+        )
+        enforce_roc = Param.Bool(True, "Whether enforce ROC")
+        subslot_opt = Param.Bool(False, "Subslot optimizations")
+        split_bus = Param.Bool(
+            False, "Split the response bus from the command bus"
+        )
+        response_bus_latency = Param.Int(8, "Cycles per response message")
+        slot_width = Param.Int(128, "Cycles per response message")
+        llc_latency = Param.Int(5, "Cycles per response message")
+        shared = Param.Bool(False, "Whether switch is shared")
 
     def setup_buffers(self, network):
         def vnet_buffer_size(vnet):

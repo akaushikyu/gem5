@@ -1,5 +1,5 @@
 protocol "EXCL";
-include "RubySlicc_interfaces.slicc";
+
 include "EXCL-msg.sm";
 include "EXCL-L1cache.sm";
 include "EXCL-L2cache.sm";
