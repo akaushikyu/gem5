@@ -63,6 +63,7 @@ namespace gem5
 class EventManager;
 class ProbeManager;
 class SimObjectResolver;
+class SimObject;
 
 /**
  * Abstract superclass for simulation objects.  Represents things that

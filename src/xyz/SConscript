@@ -1,0 +1,13 @@
+Import('*')
+
+SimObject('ZIVReplacementPolicy.py', sim_objects=['ZIVReplacementPolicy'])
+
+Source('ZIVReplacementPolicy.cc')
+Source('SlotManager.cc')
+Source('ROCQueue.cc')
+
+DebugFlag('ZIVRepl', "For xyz ZIV replacement policy")
+DebugFlag('ZIVCache', "For xyz ZIV Cache")
+DebugFlag('ZIVStats', "For xyz statistics")
+DebugFlag('TDMOrder', "Ordering at TDM")
+DebugFlag('XYZInfo', "Information")

@@ -270,7 +270,12 @@ addsymbol(ThreadContext *tc, GuestAddr addr, GuestAddr symbolAddr)
 
     DPRINTF(Loader, "Loaded symbol: %s @ %#llx\n", symbol, addr.addr);
 
-    tc->getSystemPtr()->workload->insertSymbol(
+    System *sys = tc->getSystemPtr();
+
+    // register the symbol
+    sys->recordSymbol(symbol, addr.addr);
+
+    sys->workload->insertSymbol(
         { loader::Symbol::Binding::Global,
           loader::Symbol::SymbolType::Function, symbol, addr.addr }
     );

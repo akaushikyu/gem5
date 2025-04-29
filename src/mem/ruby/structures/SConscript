@@ -47,6 +47,9 @@ SimObject('RubyCache.py', sim_objects=['RubyCache'])
 SimObject('DirectoryMemory.py', sim_objects=['RubyDirectoryMemory'])
 SimObject('RubyPrefetcher.py', sim_objects=['RubyPrefetcher'])
 SimObject('WireBuffer.py', sim_objects=['RubyWireBuffer'])
+if env['CONF']['RUBY_PROTOCOL_LC_MSI']:
+  SimObject('XYZCache.py', sim_objects=['XYZCache'])
+  SimObject('XYZStatsObject.py', sim_objects=['XYZStatsObject'])
 
 Source('DirectoryMemory.cc')
 Source('CacheMemory.cc')
@@ -60,3 +63,6 @@ Source('ALUFreeListArray.cc')
 Source('TBEStorage.cc')
 if env['CONF']['RUBY_PROTOCOL_CHI']:
     Source('MN_TBETable.cc')
+if env['CONF']['RUBY_PROTOCOL_LC_MSI']:
+    Source('XYZCacheMemory.cc')
+    Source('XYZStatsObject.cc')

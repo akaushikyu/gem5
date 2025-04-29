@@ -1139,6 +1139,9 @@ class Request : public Extensible<Request>
     {
         return _isGPUFuncAccess;
     }
+
+    // New flag to denote request in ROI
+    bool reqInROI = false;
 };
 
 } // namespace gem5

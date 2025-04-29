@@ -54,3 +54,7 @@ Source('Switch.cc')
 Source('Throttle.cc')
 
 Source('routing/WeightBased.cc')
+
+DebugFlag('ZCLLC_TDMSwitch', 'Log for TDM Switch')
+DebugFlag('ZCLLC_TDM', 'Log for TDM slots')
+DebugFlag('ROC', 'Log for TDM slots')

@@ -1,0 +1,6 @@
+protocol "Baseline_LC_MSI";
+
+include "XYZ_interfaces.slicc";
+include "LC_MSI-msg.sm";
+include "LC_MSI-cache.sm";
+include "LC_MSI-dir-bl.sm"; // The baseline

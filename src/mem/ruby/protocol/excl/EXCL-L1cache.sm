@@ -66,7 +66,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
         M_A, AccessPermission:Read_Only, desc="Issued Upg but has not observed Upg on bus";
         ML_A, AccessPermission:Read_Only, desc="Same as M_A but original request is Lock instead of GetM";
-        
+
         I_AD, AccessPermission:Busy, desc="Issued Put but has not observed Put on bus (Put has writeback)";
         I_D, AccessPermission:Busy, desc="Observed Put but waiting for writeback acknowledge";
         I_A, AccessPermission:Busy, desc="Issued Put but has not observed Put on bus (Put has no writeback)";
@@ -99,7 +99,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         OwnUpg, desc="Observe own Upg";
         OwnGetS, desc="Observe own GetS";
         OwnPut, desc="Observe own Put";
-        
+
         // Other requests
         OtherGetM, desc="Observe other GetM";
         OtherGetS, desc="Observe other GetS";
@@ -107,7 +107,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         OtherPutD, desc="Observe other PutD";
         OtherPutS, desc="Observe other PutS";
         OtherPutO_O, desc="Observe other PutO (owner is transferred to me)";
-        OtherPutO_NO, desc="Observe other PutO (owner is not transferred to me)"; 
+        OtherPutO_NO, desc="Observe other PutO (owner is not transferred to me)";
 
         // Events triggered by receiving data response
         DataFromMem, desc="Data comes from memory";
@@ -136,15 +136,16 @@ machine(MachineType:L1Cache, "L1 Cache") :
     structure(TBE, desc="Transaction buffer entry") {
         // Duplicate of cache entry fields
         State state,                            desc="TBE state";
-        
-        // Transaction buffer fields               
+
+        // Transaction buffer fields
         CoherenceRequestType requestType,       desc="Pending request type";
         bool completed,                         desc="Coherence request completion status";
         Cycles reqID,                           desc="Request ID";
+        Cycles cycle,                           desc="Cycle";
         NetDest requestors,                     desc="Pending requestors";
         bool isLockRequest,                     desc="Indicator of lock request";
         Addr from_addr,                         desc="Address of request that triggers replacement";
-        bool to_I,                              desc="Indicator of invalidation";    
+        bool to_I,                              desc="Indicator of invalidation";
     }
 
     structure(TBETable, external="yes") {
@@ -156,7 +157,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     TBETable TBEs, template="<L1Cache_TBE>", constructor="m_number_of_TBEs";
 
-    int l2_select_low_bit, default="RubySystem::getBlockSizeBits()";
+    int l2_select_low_bit, default="m_ruby_system->RubySystem::getBlockSizeBits()";
 
     ////////////////////////////////////////////////////////////////////////////
     // FUNCTIONS
@@ -175,7 +176,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // External functions (included in EXCL_includes.hh)
 
     int getNumSharer(NetDest sharers);
-    
+
     // Helper function
 
     CacheEntry getCacheEntry(Addr address), return_by_pointer="yes" {
@@ -381,7 +382,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
                 } else {
                     error("Unexpected data response type");
                 }
-                
+
             }
         }
     }
@@ -487,10 +488,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     } else if (
                         in_msg.Type == RubyRequestType:LD
                     ) {
+                        DPRINTF(RubySlicc, "READ OPERATION TO ADDR: %x\n", in_msg.LineAddress);
                         trigger(Event:Load, in_msg.LineAddress, cache_entry, tbe);
                     } else if (
                         in_msg.Type == RubyRequestType:ST
                     ) {
+                        DPRINTF(RubySlicc, "WRITE OPERATION TO ADDR: %x\n", in_msg.LineAddress);
                         trigger(Event:Store, in_msg.LineAddress, cache_entry, tbe);
                     } else if (
                         in_msg.Type == RubyRequestType:Locked_RMW_Read
@@ -688,7 +691,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             }
             L1Icache.setMRU(cache_entry);
             L1Dcache.setMRU(cache_entry);
-            sequencer.readCallback(address, cache_entry.dataBlk, true, 
+            sequencer.readCallback(address, cache_entry.dataBlk, true,
                                    machineIDToMachineType(in_msg.sender));
         }
     }
@@ -760,6 +763,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_invalid(tbe));
         TBEs.allocate(address);
         set_tbe(TBEs[address]);
+        tbe.cycle := curCycle();
     }
 
     action(initiateReplacement, desc="...") {
@@ -887,6 +891,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
                 }
             }
 
+            profiler.profileE2ELatency(curCycle(), tbe.cycle);
             TBEs.deallocate(address);
             unset_tbe();
         }
@@ -935,7 +940,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
-    
+
     // Transition on CPU request
 
     transition(I, Replacement) {
@@ -1187,7 +1192,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(S_D, OtherPutO_O) {
         setOwned;
         clearRequestor;
-        copySharerFromPut; 
+        copySharerFromPut;
         popRequestQueue;
     }
 

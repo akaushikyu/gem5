@@ -1,0 +1,66 @@
+// Essentially same as the original CacheMemory, but we have extra support
+structure (Switch, external = "yes") {
+    void markLLCDone();
+    void markLLCDone(bool wait_for_data);
+    void markLLCDone(Cycles delay);
+    void markTransactionDone();
+    int getROCCount(int set);
+}
+
+structure (XYZStatsObject, external = "yes") {
+    void recordPutS(bool);
+    void recordPutM(bool);
+    void recordReplShared();
+    void recordReplOwned();
+    void recordReplLLC();
+    void tic();
+    void toc();
+}
+
+structure (XYZCacheMemory, external = "yes") {
+  bool cacheAvail(Addr);
+  Addr cacheProbe(Addr);
+  AbstractCacheEntry getNullEntry();
+  AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
+  AbstractCacheEntry allocate(Addr, AbstractCacheEntry, bool);
+  void allocateVoid(Addr, AbstractCacheEntry);
+  void deallocate(Addr);
+  AbstractCacheEntry lookup(Addr);
+  bool isTagPresent(Addr);
+  Cycles getTagLatency();
+  Cycles getDataLatency();
+  void setMRU(Addr);
+  void setMRU(Addr, int);
+  void setMRU(AbstractCacheEntry);
+  void recordRequestType(CacheRequestType, Addr);
+  bool checkResourceAvailable(CacheResourceType, Addr);
+
+  Addr addressToCacheSet(Addr);
+  //XYZCacheMemory
+  void addSharer(Addr);
+  void markOwner(Addr);
+  void removeSharer(Addr);
+  void clearSharer(Addr);
+  void markCRE(Addr);
+  bool xyzCREAvail(Addr);
+  Addr xyzCacheProbe(Addr);
+  bool calculateVIwithDelta(int delta_lhs, int delta_rhs, int private_capcacity);
+  bool vi_enabled();
+  bool ziv_enabled();
+  Addr simpleProbe(Addr);
+
+
+  // hardware transactional memory
+  void htmCommitTransaction();
+  void htmAbortTransaction();
+
+  int getCacheSize();
+  int getNumBlocks();
+  int getNotSync();
+  Addr getAddressAtIdx(int);
+
+  void profileDemandHit();
+  void profileDemandMiss();
+  void profilePrefetchHit();
+  void profilePrefetchMiss();
+}

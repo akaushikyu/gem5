@@ -78,6 +78,7 @@ class Type(Symbol):
                 # Append with machine name
                 self.c_ident = f"{machine}_{ident}"
 
+        # TODO: do this only for a subset of protocols (PECC)
         if f"RequestMsg" in self.c_ident or f"ResponseMsg" in self.c_ident:
             self.shared = True
             # remove the protocol tag

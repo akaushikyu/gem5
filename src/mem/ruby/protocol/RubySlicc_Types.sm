@@ -289,4 +289,5 @@ structure(CustomProfiler, external="yes") {
     void profileBackInvalidationWB();
     void profilePutRequest();
     void profileMemLatency(Cycles latency);
+    void profileE2ELatency(Cycles endCycle, Cycles beginCycle);
 }

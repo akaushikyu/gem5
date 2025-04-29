@@ -9,7 +9,7 @@ machine(MachineType:Directory, "Directory") :
 
     // L2 select bits
     int l2_select_num_bits;
-    
+
     // Interface to the network
     MessageBuffer *requestIn, network="From", virtual_network="3", vnet_type="request";
     MessageBuffer *responseOut, network="To", virtual_network="4", vnet_type="response";
@@ -64,7 +64,7 @@ machine(MachineType:Directory, "Directory") :
 
     TBETable TBEs, template="<Directory_TBE>", constructor="m_number_of_TBEs";
 
-    int l2_select_low_bit, default="RubySystem::getBlockSizeBits()";
+    int l2_select_low_bit, default="m_ruby_system->RubySystem::getBlockSizeBits()";
 
     ////////////////////////////////////////////////////////////////////////////
     // FUNCTIONS

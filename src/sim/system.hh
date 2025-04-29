@@ -64,6 +64,10 @@
 #include "sim/sim_object.hh"
 #include "sim/workload.hh"
 
+#include <fstream>
+#include <iostream>
+#include <cstdarg>
+
 namespace gem5
 {
 
@@ -325,6 +329,9 @@ class System : public SimObject, public PCEventScope
     /** OS kernel */
     Workload *workload = nullptr;
 
+    typedef std::pair<std::string, uint64_t> symbolAddrPairType;
+    std::vector<symbolAddrPairType> symbolAddrList;
+
   public:
     /**
      * Get a pointer to the Kernel Virtual Machine (KVM) SimObject,
@@ -541,17 +548,37 @@ class System : public SimObject, public PCEventScope
         return threads.numActive();
     }
 
-    void
-    workItemBegin(uint32_t tid, uint32_t workid)
-    {
-        std::pair<uint32_t, uint32_t> p(tid, workid);
-        lastWorkItemStarted[p] = curTick();
-    }
+    void workItemBegin(uint32_t tid, uint32_t workid);
 
     void workItemEnd(uint32_t tid, uint32_t workid);
 
     /* Returns whether we successfully trapped into GDB. */
     bool trapToGdb(GDBSignal signal, ContextID ctx_id) const;
+
+    // record a symbol
+    void recordSymbol(std::string symbolName, uint64_t addr) {
+      symbolAddrList.push_back(std::make_pair(symbolName, addr));
+    }
+
+    bool isSymbolRegistered(const char* symbolName) {
+      for (unsigned i = 0; i < symbolAddrList.size(); i++) {
+        if (symbolAddrList[i].first == symbolName)
+          return true;
+      }
+      return false;
+    }
+
+    bool isAddrRegistered(uint64_t addr) {
+      for (unsigned i = 0; i < symbolAddrList.size(); i++) {
+        if (symbolAddrList[i].second == addr)
+          return true;
+      }
+      return false;
+    }
+
+    void logInfo(const char *fmt...);
+
+    std::ofstream logFile;
 
   protected:
     /**
@@ -610,6 +637,11 @@ class System : public SimObject, public PCEventScope
     // to be redirected to the faux-filesystem (a duplicate filesystem
     // intended to replace certain files on the host filesystem).
     std::vector<RedirectPath*> redirectPaths;
+
+    // a boolean flag to denote when work item begins using m5_work_begin
+    // 1 -- encountered a m5_work_begin
+    // 0 -- encountered a m5_work_end or otherwise
+    bool workBegin = false;
 };
 
 void printSystems();

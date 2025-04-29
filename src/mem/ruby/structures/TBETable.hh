@@ -78,6 +78,10 @@ class TBETable
     // Print cache contents
     void print(std::ostream& out) const;
 
+    // For ZCLLC caches
+    int cnt() const { return m_map.size(); }
+    void clr() { m_map.clear(); }
+
   protected:
     // Protected copy constructor and assignment operator
     TBETable(const TBETable& obj);
