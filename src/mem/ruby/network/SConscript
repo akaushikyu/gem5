@@ -31,7 +31,9 @@ Import('*')
 if not env['CONF']['RUBY']:
     Return()
 
-if env['CONF']['PROTOCOL'] == 'EXCL' or env['CONF']['PROTOCOL'] == 'INCL':
+if  env['CONF']['PROTOCOL'] == 'EXCL' or \
+    env['CONF']['PROTOCOL'] == 'INCL' or \
+    env['CONF']['PROTOCOL'] == 'EXCL_ql':
     env.Append(CPPDEFINES=['SNOOPING_BUS'])
 
 if env['CONF']['PROTOCOL'] == 'LC_MSI':

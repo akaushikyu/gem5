@@ -82,7 +82,7 @@ class Type(Symbol):
         if f"RequestMsg" in self.c_ident or f"ResponseMsg" in self.c_ident:
             self.shared = True
             # remove the protocol tag
-            self.c_ident = self.c_ident.replace("{table.slicc.protocol}/", "")
+            self.c_ident = self.c_ident.replace(r"{table.slicc.protocol}\/", "")
 
         if self.shared or not table.slicc.protocol or self.isExternal:
             self.protocol_specific = ""

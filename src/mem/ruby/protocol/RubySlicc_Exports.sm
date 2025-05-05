@@ -196,6 +196,11 @@ enumeration(RubyRequestType, desc="...", default="RubyRequestType_NULL") {
   TLBI_EXT_SYNC,      desc="TLB Invalidation Sync operation - External Sync has been requested";
   TLBI_EXT_SYNC_COMP, desc="TLB Invalidation Sync operation - External Sync has been completed";
   hasNoAddr,        desc="Request for timing purposes in VIPERSequencer hitCallback and processReadCallback but reads no address";
+  // spin queue lock optimization [RTSS 2025]
+  ENQUEUE, desc="Enqueue thread into shared lock queue structure";
+  TRYACQUIRE, desc="Try to acquire the lock";
+  ACQUIRE, desc="Acquired lock";
+  RELEASE, desc="Release lock";
 }
 
 bool isWriteRequest(RubyRequestType type);

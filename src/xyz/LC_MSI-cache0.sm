@@ -12,6 +12,8 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     MessageBuffer * responseToL1, network="To", virtual_network="5", vnet_type="prv_resp";
 
     MessageBuffer * mandatoryQueue;
+
+    //CustomProfiler *profiler;
 {
   state_declaration(State, desc="Cache states") {
     I,      AccessPermission:Invalid, desc="Not present/Invalid";
@@ -58,6 +60,7 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     State TBEState,         desc="State of block";
     DataBlock DataBlk,      desc="Data for the block. Needed for MI_A";
     int AcksOutstanding, default=0, desc="Number of acks left to receive.";
+    Cycles cycle, desc="Cycle";
   }
   structure(TBETable, external="yes") {
     TBE lookup(Addr);
@@ -68,6 +71,7 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   }
   TBETable TBEs, template="<L0Cache_TBE>", constructor="m_number_of_TBEs";
   Tick clockEdge();
+  Cycles curCycle();
 
   void set_cache_entry(AbstractCacheEntry a);
   void unset_cache_entry();
@@ -437,12 +441,14 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     TBEs.allocate(address);
     // this updates the tbe variable for other actions
     set_tbe(TBEs[address]);
+    tbe.cycle := curCycle();
   }
 
   action(deallocateTBE, "dT", desc="Deallocate TBE") {
       assert(is_valid(tbe));
       TBEs.deallocate(address);
       // this makes the tbe variable invalid
+      //profiler.profileE2ELatency(curCycle(), tbe.cycle);
       unset_tbe();
   }
 

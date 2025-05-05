@@ -59,3 +59,4 @@ config RUBY_PROTOCOL_Garnet_standalone
 rsource "chi/Kconfig"
 rsource "incl/Kconfig"
 rsource "excl/Kconfig"
+rsource "excl-ql-opt/Kconfig"

@@ -36,7 +36,11 @@ class BasicRouter(ClockedObject):
 
     router_id = Param.Int("ID in relation to other routers")
 
-    if buildEnv["PROTOCOL"] == "EXCL" or buildEnv["PROTOCOL"] == "INCL":
+    if (
+        buildEnv["PROTOCOL"] == "EXCL"
+        or buildEnv["PROTOCOL"] == "INCL"
+        or buildEnv["PROTOCOL"] == "EXCL_ql"
+    ):
         # Bus modeling related parameters
         num_processor = Param.Int(1, "Number of processors")
         tdm_slot_width = Param.Int(100, "TDM slot width in number of cycles")
