@@ -81,11 +81,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
         CMPLLSC, AccessPermission:Busy, desc="Completion state for LL/SC";
 
         // Queue lock special states
+        IE_AD, AccessPermission:Invalid, desc="Transient state, from I -> EQ";
+        IE_D, AccessPermission:Invalid, desc="Transient state after seeing own enqueue I -> EQ";
+        IEO_D, AccessPermission:Invalid, desc="Transient state after seeing own enqueue I -> EQ_O";
+        OE_A, AccessPermission:Read_Only, desc="Transient state from O -> EQ";
+        SE_A, AccessPermission:Read_Only, desc="Transient state from O/S -> EQ";
         EQ, AccessPermission:Read_Write, desc="Enqueue state, multiple cores can be in this state";
         EQ_O, AccessPermission:Read_Write, desc="Enqueue owned state, only one core can be in this state";
         A, AccessPermission:Read_Only, desc="Acquire state, only one core can be in this state";
+        TA, AccessPermission:Read_Only, desc="Try-Acquire state, only one core can be in this state";
         A_O, AccessPermission:Read_Only, desc="Acquire owned state, only one core can be in this state";
+        R_AD, AccessPermission:Read_Only, desc="Release state, waiting for release on bus";
         R_D, AccessPermission:Read_Only, desc="Release state, waiting for updated lock data from thread in EQ_O state";
+        R, AccessPermission:Read_Only, desc="Release state";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -140,6 +148,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         Acquire;                          // acquire lock operations
         TryAcquire;                       // try acquire lock operations
         Release;                          // release lock operations
+        Transfer;                          // release lock operations
 
         // Triggering events
         OwnEnqueue;                       // own enqueue lock operation
@@ -147,6 +156,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
         OwnAcquire;                       // own acquire; there is no otherAcquire
         OwnRelease;                       // own release
         OtherRelease;                     // other release
+
+        BusGrantDoEnqueue, desc="Bus grant is given, the pending action is enqueue";
+        BusGrantDoRelease, desc="Bus grant is given, the pending action is release";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -416,6 +428,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     }
                 } else if (tbe.requestType == CoherenceRequestType:Put) {
                     trigger(Event:BusGrantDoPut, in_msg.addr, cache_entry, tbe);
+                } else if (tbe.requestType == CoherenceRequestType:Enqueue) {
+                    trigger(Event:BusGrantDoEnqueue, in_msg.addr, cache_entry, tbe);
+                } else if (tbe.requestType == CoherenceRequestType:Release) {
+                    trigger(Event:BusGrantDoRelease, in_msg.addr, cache_entry, tbe);
                 } else {
                     error("Unexpected pending request type in TBE");
                 }
@@ -571,6 +587,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     } else if (in_msg.Type == RubyRequestType:RELEASE) {
                       DPRINTF(RubySlicc, "Trigger release lock event\n");
                       trigger(Event:Release, in_msg.LineAddress, cache_entry, tbe);
+                    } else if (in_msg.Type == RubyRequestType:TRANSFER) {
+                      DPRINTF(RubySlicc, "Trigger transfer lock event\n");
+                      trigger(Event:Transfer, in_msg.LineAddress, cache_entry, tbe);
                     } else {
                       DPRINTF(RubySlicc,
                         "Unexpected request from processor %s\n", RubyRequestType_to_string(in_msg.Type));
@@ -669,6 +688,36 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
+    action(sendEnqueue, desc="Issue enqueue") {
+        assert(is_valid(tbe));
+        // [TODO] add profiler hooks
+        DPRINTF(RubySlicc, "ACTION: sendEnqueue on %x\n", address);
+        enqueue(requestOutPort, RequestMsg, 1) {
+          out_msg.reqID := curCycle();
+          out_msg.addr := address;
+          out_msg.type := CoherenceRequestType:Enqueue;
+          out_msg.requestor := machineID;
+          out_msg.Destination.clear();
+          out_msg.Destination.broadcast(MachineType:L1Cache);
+          out_msg.MessageSize := MessageSizeType:Control;
+        }
+    }
+
+    action(sendRelease, desc="Issue release") {
+        assert(is_valid(tbe));
+        // [TODO] add profiler hooks
+        DPRINTF(RubySlicc, "ACTION: sendRelease on %x\n", address);
+        enqueue(requestOutPort, RequestMsg, 1) {
+          out_msg.reqID := curCycle();
+          out_msg.addr := address;
+          out_msg.type := CoherenceRequestType:Release;
+          out_msg.requestor := machineID;
+          out_msg.Destination.clear();
+          out_msg.Destination.broadcast(MachineType:L1Cache);
+          out_msg.MessageSize := MessageSizeType:Control;
+        }
+    }
+
     action(sendUpg, desc="Issue Upg") {
         assert(is_valid(tbe));
         DPRINTF(RubySlicc, "ACTION: sendUpg on %x\n", address);
@@ -762,6 +811,21 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     out_msg.MessageSize := MessageSizeType:Response_Data;
                 }
             }
+        }
+    }
+
+    action(pushData, "pd", desc="Push data to others to update") {
+        DPRINTF(RubySlicc, "ACTION: push data on %x\n", address);
+        assert(is_valid(cache_entry));
+        enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+          out_msg.reqID := curCycle();
+          out_msg.addr := address;
+          out_msg.type := CoherenceResponseType:CacheToCache;
+          out_msg.sender := machineID;
+          out_msg.Destination.clear();
+          out_msg.Destination.broadcast(MachineType:L1Cache);
+          out_msg.MessageSize := MessageSizeType:Response_Data;
+          out_msg.dirty := cache_entry.dirty;
         }
     }
 
@@ -905,6 +969,18 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.requestType := CoherenceRequestType:GetM;
     }
 
+    action(initiateEnqueue, desc="...") {
+        DPRINTF(RubySlicc, "ACTION: initiateEnqueue on %x\n", address);
+        assert(is_valid(tbe));
+        tbe.requestType := CoherenceRequestType:Enqueue;
+    }
+
+    action(initiateRelease, desc="...") {
+        DPRINTF(RubySlicc, "ACTION: initiateRelease on %x\n", address);
+        assert(is_valid(tbe));
+        tbe.requestType := CoherenceRequestType:Release;
+    }
+
     action(initiateGetMLocked, desc="...") {
         DPRINTF(RubySlicc, "ACTION: initiateGetMLocked on %x\n", address);
         assert(is_valid(tbe));
@@ -925,6 +1001,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         DPRINTF(RubySlicc, "ACTION: setOwned on %x\n", address);
         assert(is_valid(cache_entry));
         cache_entry.owned := true;
+    }
+
+    action(resetOwned, desc="") {
+        DPRINTF(RubySlicc, "ACTION: resetOwned on %x\n", address);
+        assert(is_valid(cache_entry));
+        cache_entry.owned := false;
     }
 
     action(setToI, desc="") {
@@ -1088,8 +1170,175 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
 
-    // Transitions on spin lock request/phases
-    // [TODO]
+    // Begin transitions on spin lock request/phases
+    // ##########################################
+
+    // On enqueue operation, CLs in I, O, S need to broadcast their request on the
+    // bus so that they can receive the most up-to-date queue data
+    transition({I,O,S}, Enqueue) {
+      allocateTBE;
+      initiateEnqueue;
+      sendBusRequest;
+      popMandatoryQueue;
+    }
+
+    // on enqueue operation, CLs in M and E states are cache hits
+    transition({M,E}, Enqueue, EQ_O) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(I, BusGrantDoEnqueue, IE_AD) {
+      sendEnqueue;
+      popBusGrantQueue;
+    }
+
+    // have different transient states to react to other loads/stores accordingly
+    transition({S,O}, BusGrantDoEnqueue, OE_A) {
+      setOwned;
+      sendEnqueue;
+      popBusGrantQueue;
+    }
+
+    // While in the middle of enqueue, if we see another enqueue then we no longer 
+    // own the shared queue
+    transition(OE_A, OtherEnqueue, SE_A) {
+      resetOwned;
+      checkAndAddRequestor;
+      popRequestQueue;
+    }
+
+    transition(SE_A, OtherEnqueue) {
+      popRequestQueue;
+    }
+
+    transition(IE_AD, OtherEnqueue) {
+      popRequestQueue;
+    }
+
+    transition(IE_AD, OwnEnqueue, IEO_D) {
+      setOwned;
+      popRequestQueue;
+    }
+
+    transition(IE_D, OtherEnqueue) {
+      popRequestQueue;
+    }
+
+    transition(IEO_D, OtherEnqueue, IE_D) {
+      resetOwned;
+      checkAndAddRequestor;
+      popRequestQueue;
+    }
+
+    transition({IEO_D, IE_D}, {DataCacheToCache, DataFromLLC, DataFromMem}, CMP) {
+      writeDataResponseToCache;
+      externalStoreHit;
+      popResponseQueue;
+      triggerLocalReqCompletion;
+    }
+
+    transition({SE_A,OE_A}, OwnEnqueue, CMP) {
+        upgStoreHit;
+        popRequestQueue;
+        triggerLocalReqCompletion;
+    }
+
+    transition(EQ_O, OtherEnqueue, EQ) {
+      resetOwned;
+      sendDataResponse;
+      popRequestQueue;
+    }
+
+    transition(EQ, OtherEnqueue) {
+      // do nothing
+      popRequestQueue;
+    }
+
+    transition(EQ, Acquire, A) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQ_O, Acquire, A_O) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition({A, TA}, OtherEnqueue) {
+      // do nothing, there should exist another core that supplies
+      // the data
+      popRequestQueue;
+    }
+
+    transition(A_O, OtherEnqueue, A) {
+      resetOwned;
+      sendDataResponse;
+      popRequestQueue;
+    }
+
+    transition(A, Acquire, TA) {
+      // we tried acquire again without seeing a release in between
+      // this means we have not acquired, rather trying to acquire
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(TA, Acquire) {
+      // remain in the same state
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(A, Release) {
+      allocateTBE;
+      initiateRelease;
+      sendBusRequest;
+      popMandatoryQueue;
+    }
+
+    transition(A, BusGrantDoRelease, R_AD) {
+      sendRelease;
+      popBusGrantQueue;
+    }
+
+    transition({TA,EQ}, OtherRelease) {
+      // do nothing
+      popRequestQueue;
+    }
+
+    transition(EQ_O, OtherRelease) {
+      sendDataResponse;
+      popRequestQueue;
+    }
+
+    transition(R_AD, OwnRelease, R_D) {
+      popRequestQueue;
+    }
+
+    transition(R_D, DataCacheToCache, CMP) {
+      writeDataResponseToCache;
+      externalLoadHit;
+      popResponseQueue;
+      triggerLocalReqCompletion;
+    }
+
+    transition(R, Transfer, I) {
+      // once transfer is initiated, send the updated data
+      // to store on the bus; other cores that have the CL
+      // will locally update their CLs with the new data
+      storeHit;
+      pushData;
+      popMandatoryQueue;
+    }
+
+    transition({EQ,EQ_O}, DataCacheToCache) {
+      writeDataResponseToCache;
+      popResponseQueue;
+    }
+    
+    // ##########################################
+    // End transitions on spin lock request/phases
 
     // Transition on CPU request
     transition(I, Replacement) {

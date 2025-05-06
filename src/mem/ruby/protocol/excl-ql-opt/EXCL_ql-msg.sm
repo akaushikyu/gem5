@@ -10,6 +10,11 @@ enumeration(CoherenceRequestType, desc="Types of coherence requests") {
     Upg,            desc="Upgrade";
     Put,            desc="Put";
     BusRequest,     desc="Get bus request";
+
+    Enqueue,        desc="Enqueue";
+    Acquire,        desc="Acquire";
+    Release,        desc="Release";
+    Transfer,       desc="Transfer";
 }
 
 // RequestMsg

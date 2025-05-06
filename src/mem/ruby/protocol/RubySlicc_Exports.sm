@@ -201,6 +201,7 @@ enumeration(RubyRequestType, desc="...", default="RubyRequestType_NULL") {
   TRYACQUIRE, desc="Try to acquire the lock";
   ACQUIRE, desc="Acquired lock";
   RELEASE, desc="Release lock";
+  TRANSFER, desc="Transfer lock";
 }
 
 bool isWriteRequest(RubyRequestType type);
