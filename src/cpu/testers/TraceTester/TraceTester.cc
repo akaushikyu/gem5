@@ -65,35 +65,42 @@ TraceTester::completeRequest(PacketPtr pkt) {
 
 bool 
 TraceTester::readTrace(TraceElement& element) {
-    std::string line;
-    bool success = false;
-    while (getline(traceInputStream, line).good()) {
-        uint64_t timestamp;
-        int requestorID;
-        std::string command;
-        Addr addr;
-        std::istringstream iss(line);
+  std::string line;
+  bool success = false;
+  while (getline(traceInputStream, line).good()) {
+    uint64_t timestamp;
+    int requestorID;
+    std::string command;
+    Addr addr;
+    std::istringstream iss(line);
 
-        if (!(iss >> timestamp >> requestorID >> command >> std::hex >> addr)) {
-            panic("Failure in parsing line \"%s\" in trace file %s\n", line, traceFile);
-        }
-
-        if (requestorID == id) {
-            element.timestamp = Cycles(timestamp);
-            element.requestorID = requestorID;
-            if (command == "R") {
-                element.cmd = MemCmd::ReadReq;
-            } else {
-                assert(command == "W");
-                element.cmd = MemCmd::WriteReq;
-            }
-            element.addr = addr;
-            success = true;
-            break;
-        }
+    if (!(iss >> timestamp >> requestorID >> command >> std::hex >> addr)) {
+      panic("Failure in parsing line \"%s\" in trace file %s\n", line, traceFile);
     }
 
-    return success;
+    if (requestorID == id) {
+      element.timestamp = Cycles(timestamp);
+      element.requestorID = requestorID;
+      if (command == "R") {
+        element.cmd = MemCmd::ReadReq;
+      } else if (command == "E") {
+        element.cmd = MemCmd::EnqueueReq;
+      } else if (command == "A") {
+        element.cmd = MemCmd::AcquireReq;
+      } else if (command == "RL") {
+        element.cmd = MemCmd::ReleaseReq;
+      } else if (command == "T") {
+        element.cmd = MemCmd::TransferReq;
+      } else {
+        assert(command == "W");
+        element.cmd = MemCmd::WriteReq;
+      }
+      element.addr = addr;
+      success = true;
+      break;
+    }
+  }
+  return success;
 }
 
 void 
@@ -107,7 +114,11 @@ bool
 TraceTester::sendRequest(TraceElement element) {
     DPRINTF(TraceTester, "Core %d: Issuing %s at address 0x%x\n",
             id,
-            (element.cmd == MemCmd::WriteReq) ? "write" : "read",
+            (element.cmd == MemCmd::WriteReq) ? "write" :
+            ((element.cmd == MemCmd::EnqueueReq) ? "enqueue" :
+            ((element.cmd == MemCmd::AcquireReq) ? "acquire" :
+            ((element.cmd == MemCmd::ReleaseReq) ? "release" :
+            ((element.cmd == MemCmd::TransferReq) ? "transfer" : "read")))),
             element.addr);
     Request::Flags flags;
     RequestPtr req = std::make_shared<Request>(element.addr, 1, flags, id);

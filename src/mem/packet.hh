@@ -149,6 +149,11 @@ class MemCmd
         HTMAbort,
         // Tlb shootdown
         TlbiExtSync,
+        // Spin lock queue commands
+        EnqueueReq,
+        AcquireReq,
+        ReleaseReq,
+        TransferReq,
         NUM_MEM_CMDS
     };
 
@@ -177,6 +182,10 @@ class MemCmd
         IsPrint,        //!< Print state matching address (for debugging)
         IsFlush,        //!< Flush the address from caches
         FromCache,      //!< Request originated from a caching agent
+        IsEnqueue,      // !< Enqueue
+        IsAcquire,      // !< Acquire
+        IsRelease,      // !< Release
+        IsTransfer,     // !< Transfer
         NUM_COMMAND_ATTRIBUTES
     };
 
@@ -249,6 +258,10 @@ class MemCmd
      */
     bool hasData() const        { return testCmdAttrib(HasData); }
     bool isLLSC() const         { return testCmdAttrib(IsLlsc); }
+    bool isEnqueue() const      { return testCmdAttrib(IsEnqueue); }
+    bool isAcquire() const      { return testCmdAttrib(IsAcquire); }
+    bool isRelease() const      { return testCmdAttrib(IsRelease); }
+    bool isTransfer() const     { return testCmdAttrib(IsTransfer); }
     bool isLockedRMW() const    { return testCmdAttrib(IsLockedRMW); }
     bool isSWPrefetch() const   { return testCmdAttrib(IsSWPrefetch); }
     bool isHWPrefetch() const   { return testCmdAttrib(IsHWPrefetch); }
@@ -624,6 +637,10 @@ class Packet : public Printable, public Extensible<Packet>
         return resp_cmd.hasData();
     }
     bool isLLSC() const              { return cmd.isLLSC(); }
+    bool isEnqueue() const           { return cmd.isEnqueue(); }
+    bool isAcquire() const           { return cmd.isAcquire();}
+    bool isRelease() const           { return cmd.isRelease(); }
+    bool isTransfer() const          { return cmd.isTransfer(); }
     bool isLockedRMW() const         { return cmd.isLockedRMW(); }
     bool isError() const             { return cmd.isError(); }
     bool isPrint() const             { return cmd.isPrint(); }

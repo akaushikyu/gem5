@@ -172,6 +172,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool dirty,             default="false", desc="Dirty bit";
         bool owned,             default="false", desc="Owned?";
         bool locked,            default="false", desc="Locked?";
+        bool isEnqueued,        default="false", desc="Enqueued?";
+        bool isReleased,        default="false", desc="Released?";
         NetDest sharers,        desc="Sharers";
     }
 
@@ -187,6 +189,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         Cycles cycle,                           desc="Cycle";
         NetDest requestors,                     desc="Pending requestors";
         bool isLockRequest,                     desc="Indicator of lock request";
+        bool isEnqueued,                        desc="Enqueued";
         Addr from_addr,                         desc="Address of request that triggers replacement";
         bool to_I,                              desc="Indicator of invalidation";
     }
@@ -290,6 +293,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool owned := cache_entry.owned;
         bool uniqueness := false;
         bool isTBELocked := false;
+        bool isEnqueued := cache_entry.isEnqueued;
+        bool isReleased := cache_entry.isReleased;
         if (is_valid(tbe)) {
           isTBELocked := tbe.isLockRequest;
         }
@@ -298,11 +303,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
         if (owned && cache_entry.sharers.count() == 1) {
             uniqueness := true;
         }
-
         if (isCLLocked) {
           return State:M;
         }
-
         // determine next stable state based on state characteristics
         if (isTBELocked) {
           // toggling between tbe and cache entry locked fields to
@@ -311,7 +314,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
           cache_entry.locked := true;
           return State:L;
         }
-
+        if (isEnqueued && owned) {
+          return State:EQ_O;
+        }
+        if (isEnqueued) {
+          return State:EQ;
+        }
+        if (isReleased) {
+          return State:R;
+        }
         if (!owned) {
             return State:S;
         }
@@ -444,7 +455,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
             peek(responseInPort, ResponseMsg) {
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
-                assert(is_valid(tbe));
+                // [ANI] Removing this when lock owner pushes data to cores...
+                //assert(is_valid(tbe));
 
                 if (in_msg.type == CoherenceResponseType:Ack) {
                     trigger(Event:Ack, in_msg.addr, cache_entry, tbe);
@@ -478,6 +490,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
                         trigger(Event:OwnPut, in_msg.addr, cache_entry, tbe);
                     } else if (in_msg.type == CoherenceRequestType:Upg) {
                         trigger(Event:OwnUpg, in_msg.addr, cache_entry, tbe);
+                    } else if (in_msg.type == CoherenceRequestType:Enqueue) {
+                        trigger(Event:OwnEnqueue, in_msg.addr, cache_entry, tbe);
+                    } else if (in_msg.type == CoherenceRequestType:Release) {
+                        trigger(Event:OwnRelease, in_msg.addr, cache_entry, tbe);
                     } else {
                         error("L1 controller: unexpected coherence request");
                     }
@@ -501,6 +517,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
                         } else {
                             trigger(Event:OtherPutS, in_msg.addr, cache_entry, tbe);
                         }
+                    } else if (in_msg.type == CoherenceRequestType:Enqueue) {
+                        trigger(Event:OtherEnqueue, in_msg.addr, cache_entry, tbe);
+                    } else if (in_msg.type == CoherenceRequestType:Release) {
+                        trigger(Event:OtherRelease, in_msg.addr, cache_entry, tbe);
                     } else {
                         error("L1 controller: unexpected coherence request");
                     }
@@ -699,6 +719,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
           out_msg.requestor := machineID;
           out_msg.Destination.clear();
           out_msg.Destination.broadcast(MachineType:L1Cache);
+          out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                                    l2_select_low_bit, l2_select_num_bits, intToID(0)));
           out_msg.MessageSize := MessageSizeType:Control;
         }
     }
@@ -824,6 +846,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
           out_msg.sender := machineID;
           out_msg.Destination.clear();
           out_msg.Destination.broadcast(MachineType:L1Cache);
+          // do not send to yourself
+          out_msg.Destination.remove(machineID);
           out_msg.MessageSize := MessageSizeType:Response_Data;
           out_msg.dirty := cache_entry.dirty;
         }
@@ -1003,6 +1027,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
         cache_entry.owned := true;
     }
 
+    action(setEnqueued, desc="") {
+        DPRINTF(RubySlicc, "ACTION: setEnqueued on %x\n", address);
+        assert(is_valid(cache_entry));
+        cache_entry.isEnqueued := true;
+    }
+
+    action(setReleased, desc="") {
+        DPRINTF(RubySlicc, "ACTION: setReleased on %x\n", address);
+        assert(is_valid(cache_entry));
+        cache_entry.isEnqueued := false;
+        cache_entry.isReleased := true;
+    }
+
     action(resetOwned, desc="") {
         DPRINTF(RubySlicc, "ACTION: resetOwned on %x\n", address);
         assert(is_valid(cache_entry));
@@ -1094,7 +1131,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
                 // forward response to potential pending requestors
                 assert(is_valid(cache_entry));
                 int num_requestors := getNumSharer(tbe.requestors);
-                if (cache_entry.owned && (num_requestors > 0)) {
+                if ((cache_entry.owned && (num_requestors > 0)) ||
+                    (cache_entry.isEnqueued && (num_requestors >0))) {
                     enqueue(responseOutPort, ResponseMsg, 1) {
                         out_msg.reqID := tbe.reqID;
                         out_msg.addr := address;
@@ -1175,6 +1213,21 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     // On enqueue operation, CLs in I, O, S need to broadcast their request on the
     // bus so that they can receive the most up-to-date queue data
+
+    transition(I, OtherEnqueue) {
+      popRequestQueue;
+    }
+
+    transition(S, OtherEnqueue, I) {
+      invalidateCacheEntry;
+      popRequestQueue;
+    }
+
+    transition({M,O}, OtherEnqueue, I) {
+      sendDataResponse;
+      popRequestQueue;
+    }
+
     transition({I,O,S}, Enqueue) {
       allocateTBE;
       initiateEnqueue;
@@ -1200,7 +1253,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popBusGrantQueue;
     }
 
-    // While in the middle of enqueue, if we see another enqueue then we no longer 
+    // While in the middle of enqueue, if we see another enqueue then we no longer
     // own the shared queue
     transition(OE_A, OtherEnqueue, SE_A) {
       resetOwned;
@@ -1232,6 +1285,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition({IEO_D, IE_D}, {DataCacheToCache, DataFromLLC, DataFromMem}, CMP) {
+      setEnqueued;
       writeDataResponseToCache;
       externalStoreHit;
       popResponseQueue;
@@ -1240,6 +1294,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition({SE_A,OE_A}, OwnEnqueue, CMP) {
         upgStoreHit;
+        setEnqueued;
         popRequestQueue;
         triggerLocalReqCompletion;
     }
@@ -1277,6 +1332,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popRequestQueue;
     }
 
+    transition(A_O, Acquire) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
     transition(A, Acquire, TA) {
       // we tried acquire again without seeing a release in between
       // this means we have not acquired, rather trying to acquire
@@ -1297,17 +1357,23 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popMandatoryQueue;
     }
 
-    transition(A, BusGrantDoRelease, R_AD) {
+    transition(A_O, Release, R) {
+      setReleased;
+      externalLoadHit;
+      popMandatoryQueue;
+    }
+
+    transition({A,A_O}, BusGrantDoRelease, R_AD) {
       sendRelease;
       popBusGrantQueue;
     }
 
-    transition({TA,EQ}, OtherRelease) {
+    transition({TA,EQ,I}, OtherRelease) {
       // do nothing
       popRequestQueue;
     }
 
-    transition(EQ_O, OtherRelease) {
+    transition({A_O,EQ_O}, OtherRelease) {
       sendDataResponse;
       popRequestQueue;
     }
@@ -1317,6 +1383,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(R_D, DataCacheToCache, CMP) {
+      setReleased;
       writeDataResponseToCache;
       externalLoadHit;
       popResponseQueue;
@@ -1336,7 +1403,21 @@ machine(MachineType:L1Cache, "L1 Cache") :
       writeDataResponseToCache;
       popResponseQueue;
     }
-    
+
+    transition(TA, DataCacheToCache, EQ) {
+      writeDataResponseToCache;
+      popResponseQueue;
+    }
+
+    transition(A_O, DataCacheToCache, EQ_O) {
+      writeDataResponseToCache;
+      popResponseQueue;
+    }
+
+    transition(I, DataCacheToCache) {
+      // do nothing..
+      popResponseQueue;
+    }
     // ##########################################
     // End transitions on spin lock request/phases
 

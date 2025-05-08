@@ -501,16 +501,22 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
             assert(seq_req.m_type != RubyRequestType_IFETCH);
             assert(seq_req.m_type != RubyRequestType_ATOMIC_RETURN);
             assert(seq_req.m_type != RubyRequestType_ATOMIC_NO_RETURN);
+            assert(seq_req.m_type != RubyRequestType_Acquire);
+            assert(seq_req.m_type != RubyRequestType_Release);
         }
 
         // handle write request
+        // [TODO] The enqueue operation is more like a meta-data tag on store-conditional
         if ((seq_req.m_type != RubyRequestType_LD) &&
             (seq_req.m_type != RubyRequestType_Load_Linked) &&
-            (seq_req.m_type != RubyRequestType_IFETCH)) {
+            (seq_req.m_type != RubyRequestType_IFETCH) &&
+            (seq_req.m_type != RubyRequestType_ACQUIRE) &&
+            (seq_req.m_type != RubyRequestType_RELEASE)) {
             // LL/SC support (tested with ARMv8)
             bool success = true;
 
-            if (seq_req.m_type != RubyRequestType_Store_Conditional) {
+            if (seq_req.m_type != RubyRequestType_Store_Conditional &&
+                seq_req.m_type != RubyRequestType_ENQUEUE) {
                 // Regular stores to addresses being monitored
                 // will fail (remove) the monitor entry.
                 llscClearMonitor(address);
@@ -577,12 +583,16 @@ Sequencer::processReadCallback(SequencerRequest &seq_req,
     if (ruby_request) {
         assert((seq_req.m_type == RubyRequestType_LD) ||
                (seq_req.m_type == RubyRequestType_Load_Linked) ||
-               (seq_req.m_type == RubyRequestType_IFETCH));
+               (seq_req.m_type == RubyRequestType_IFETCH) ||
+               (seq_req.m_type == RubyRequestType_ACQUIRE) ||
+               (seq_req.m_type == RubyRequestType_RELEASE));
     }
     if ((seq_req.m_type != RubyRequestType_LD) &&
         (seq_req.m_type != RubyRequestType_Load_Linked) &&
         (seq_req.m_type != RubyRequestType_IFETCH) &&
-        (seq_req.m_type != RubyRequestType_REPLACEMENT)) {
+        (seq_req.m_type != RubyRequestType_REPLACEMENT) &&
+        (seq_req.m_type != RubyRequestType_ACQUIRE) &&
+        (seq_req.m_type != RubyRequestType_RELEASE)) {
         // Write request: reissue request to the cache hierarchy
         issueRequest(seq_req.pkt, seq_req.m_second_type);
         return true;
@@ -1013,6 +1023,14 @@ Sequencer::makeRequest(PacketPtr pkt)
 #endif
     } else if (pkt->req->hasNoAddr()) {
         primary_type = secondary_type = RubyRequestType_hasNoAddr;
+    } else if (pkt->isEnqueue()) {
+        primary_type = secondary_type = RubyRequestType_ENQUEUE;
+    } else if (pkt->isAcquire()) {
+        primary_type = secondary_type = RubyRequestType_ACQUIRE;
+    } else if (pkt->isRelease()) {
+        primary_type = secondary_type = RubyRequestType_RELEASE;
+    } else if (pkt->isTransfer()) {
+        primary_type = secondary_type = RubyRequestType_TRANSFER;
     } else {
         //
         // To support SwapReq, we need to check isWrite() first: a SwapReq

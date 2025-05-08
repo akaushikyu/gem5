@@ -237,6 +237,18 @@ MemCmd::commandInfo[] =
     { {IsRead, IsResponse}, InvalidCmd, "HTMReqResp" },
     { {IsRead, IsRequest}, InvalidCmd, "HTMAbort" },
     { {IsRequest}, InvalidCmd, "TlbiExtSync" },
+    /* EnqueueCmd */
+    { {IsEnqueue, NeedsWritable, IsRequest, NeedsResponse, HasData},
+            WriteResp, "EnqueueReq" },
+     /* AcquireCmd */
+    { {IsAcquire, IsRequest, NeedsResponse, HasData},
+            ReadResp, "AcquireReq" },
+     /* ReleaseCmd */
+    { {IsRelease, IsRequest, NeedsResponse, HasData},
+            ReadResp, "ReleaseReq" },
+     /* TransferCmd */
+    { {IsTransfer, NeedsWritable, IsRequest, NeedsResponse, HasData},
+            WriteResp, "TransferReq" },
 };
 
 AddrRange

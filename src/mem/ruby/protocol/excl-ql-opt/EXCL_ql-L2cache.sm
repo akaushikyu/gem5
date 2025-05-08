@@ -255,7 +255,9 @@ machine(MachineType:L2Cache, "LLC") :
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
 
-                if (in_msg.type == CoherenceRequestType:GetS || in_msg.type == CoherenceRequestType:GetM) {
+                if (in_msg.type == CoherenceRequestType:GetS ||
+                    in_msg.type == CoherenceRequestType:GetM ||
+                    in_msg.type == CoherenceRequestType:Enqueue) {
                     trigger(Event:Get, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceRequestType:Put && in_msg.writeback) {
                     assert(is_invalid(cache_entry));
