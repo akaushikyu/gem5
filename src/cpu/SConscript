@@ -121,6 +121,9 @@ if env['CONF']['USE_CAPSTONE']:
     Source('capstone.cc')
     SimObject('Capstone.py', sim_objects=['CapstoneDisassembler'])
 
+if env['CONF']['PROTOCOL'] == 'EXCL_ql':
+  env.Append(CPPDEFINED=['BESPOKE'])
+
 SimObject('DummyChecker.py', sim_objects=['DummyChecker'])
 Source('checker/cpu.cc')
 DebugFlag('Checker')

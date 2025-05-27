@@ -63,7 +63,7 @@ TraceTester::completeRequest(PacketPtr pkt) {
     }
 }
 
-bool 
+bool
 TraceTester::readTrace(TraceElement& element) {
   std::string line;
   bool success = false;
@@ -83,14 +83,26 @@ TraceTester::readTrace(TraceElement& element) {
       element.requestorID = requestorID;
       if (command == "R") {
         element.cmd = MemCmd::ReadReq;
-      } else if (command == "E") {
-        element.cmd = MemCmd::EnqueueReq;
-      } else if (command == "A") {
+      }
+#if defined (BESPOKE)
+      else if (command == "E.W") {
+        element.cmd = MemCmd::EnqueueWriteReq;
+      } else if (command == "E.LL") {
+        element.cmd = MemCmd::EnqueueLdLinkedReq;
+      } else if (command == "E.SC") {
+        element.cmd = MemCmd::EnqueueStCondReq;
+      } else if (command == "E.SCI") {
+        element.cmd = MemCmd::EnqueueStCondInvReq;
+      } else if (command == "A.R") {
         element.cmd = MemCmd::AcquireReq;
-      } else if (command == "RL") {
+      } else if (command == "RL.R") {
         element.cmd = MemCmd::ReleaseReq;
-      } else if (command == "T") {
+      } else if (command == "T.W") {
         element.cmd = MemCmd::TransferReq;
+      }
+#endif
+      else if (command == "LL") {
+        element.cmd = MemCmd::LoadLockedReq;
       } else {
         assert(command == "W");
         element.cmd = MemCmd::WriteReq;
@@ -103,7 +115,7 @@ TraceTester::readTrace(TraceElement& element) {
   return success;
 }
 
-void 
+void
 TraceTester::wakeup() {
     Cycles current_cycle = curCycle();
     assert(traceElement.timestamp <= current_cycle);
@@ -114,11 +126,18 @@ bool
 TraceTester::sendRequest(TraceElement element) {
     DPRINTF(TraceTester, "Core %d: Issuing %s at address 0x%x\n",
             id,
+#if defined (BESPOKE)
             (element.cmd == MemCmd::WriteReq) ? "write" :
-            ((element.cmd == MemCmd::EnqueueReq) ? "enqueue" :
+            ((element.cmd == MemCmd::EnqueueLdLinkedReq) ? "enqueueLL" :
+            ((element.cmd == MemCmd::EnqueueStCondReq) ? "enqueueStCond" :
+            ((element.cmd == MemCmd::EnqueueStCondInvReq) ? "enqueueStCondInv" :
+            ((element.cmd == MemCmd::EnqueueWriteReq) ? "enqueueWriteReq" :
             ((element.cmd == MemCmd::AcquireReq) ? "acquire" :
             ((element.cmd == MemCmd::ReleaseReq) ? "release" :
-            ((element.cmd == MemCmd::TransferReq) ? "transfer" : "read")))),
+            ((element.cmd == MemCmd::TransferReq) ? "transfer" : "read"))))))),
+#else
+            (element.cmd == MemCmd::WriteReq) ? "write" : "read",
+#endif
             element.addr);
     Request::Flags flags;
     RequestPtr req = std::make_shared<Request>(element.addr, 1, flags, id);
@@ -127,11 +146,11 @@ TraceTester::sendRequest(TraceElement element) {
     PacketPtr pkt = new Packet(req, element.cmd);
     pkt->dataDynamic(pkt_data);
     if (!port.sendTimingReq(pkt)) {
-       panic("Failed to send request to port %d\n", id);     
+       panic("Failed to send request to port %d\n", id);
     }
-    DPRINTF(TraceTester, "Issuing request: requestor %d, command %s, addr 0x%x\n", 
-            id, 
-            (element.cmd == MemCmd::WriteReq) ? "write" : "read", 
+    DPRINTF(TraceTester, "Issuing request: requestor %d, command %s, addr 0x%x\n",
+            id,
+            (element.cmd == MemCmd::WriteReq) ? "write" : "read",
             element.addr);
     return true;
 }

@@ -278,7 +278,73 @@ TimingSimpleCPU::handleReadPacket(PacketPtr pkt)
         assert(!req->isLocalAccess());
     }
 
-    DPRINTF(SimpleCPU, "Issuing access to memory hierarchy to addr: %#x, %#x, PC: %#x, cycle: %s\n",
+#if defined (BESPOKE)
+    // [ANI] This is a workaround until we finalize on the ISA design
+    // Here, we check the PC and accordingly manipulate the pkt request type
+    // For MCS:
+    // 10d76 -- Enqueue initialization
+    // 10d7e -- Enqueue ld
+    // 10d82 -- Enqueue st (local/remote?) --> This is part of the LL/SC pair
+    // 10d8c -- Enqueue store (local)
+    // 10d96 -- Enqueue store (remote)
+    // 10da2 -- Acquire
+    // 10daa -- Acquire
+    // 10db2, 10dce -- Release
+    // 10dbc -- Release ll
+    // 10dc4 -- Release sc
+    // 10db6 -- Transfer store (remote)
+
+    const int enqueueInit = 0x10d76;
+    const int enqueueLLPC = 0x10d7e;
+    const int enqueueSCIPC = 0x10d82; // not used
+    const int enqueueSCPC = 0x0; //0x10d82;
+    const std::array<int, 2> enqueueWPC = {0x10d8c, 0x10d96};
+    const std::array<int, 2> acquirePC  = {0x10da2, 0x10daa};
+    const std::array<int, 2> releasePC  = {0x10db2, 0x10dce};
+    const int transferPC = 0x10db6;
+
+    if (pkt->req->getPC() == enqueueInit) {
+      DPRINTF(SimpleCPU, "Issuing enqueue initialization %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::EnqueueInitReq;
+    }
+    if (pkt->req->getPC() == enqueueLLPC) {
+      DPRINTF(SimpleCPU, "Issuing enqueue ldlinked req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::EnqueueLdLinkedReq;
+    }
+    if (pkt->req->getPC() == enqueueSCIPC) {
+      DPRINTF(SimpleCPU, "Issuing enqueue stcond req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::EnqueueStCondInvReq;
+    }
+    if (pkt->req->getPC() == enqueueSCPC) {
+      DPRINTF(SimpleCPU, "Issuing enqueue stcond req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::EnqueueStCondReq;
+    }
+    if (std::find(enqueueWPC.begin(),
+                  enqueueWPC.end(),
+                  pkt->req->getPC()) != enqueueWPC.end()) {
+      DPRINTF(SimpleCPU, "Issuing enqueue write req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::EnqueueWriteReq;
+    }
+    if (std::find(acquirePC.begin(),
+                  acquirePC.end(),
+                  pkt->req->getPC()) != acquirePC.end()) {
+      DPRINTF(SimpleCPU, "Issuing acquire write req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::AcquireReq;
+    }
+    if (std::find(releasePC.begin(),
+                  releasePC.end(),
+                  pkt->req->getPC()) != releasePC.end()) {
+      DPRINTF(SimpleCPU, "Issuing release write req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::ReleaseReq;
+    }
+    if (pkt->req->getPC() == transferPC) {
+      DPRINTF(SimpleCPU, "Issuing transfer write req %x\n", pkt->getAddr());
+      pkt->cmd = MemCmd::TransferReq;
+    }
+#endif
+
+    DPRINTF(SimpleCPU, "(HRP) Issuing access to memory hierarchy to addr: \
+                        %#x, %#x, PC: %#x, cycle: %s\n",
           pkt->getAddr(), pkt->req->getVaddr(), pkt->req->getPC(), curCycle());
 
     pkt->issuedCycle = curCycle();
@@ -522,7 +588,70 @@ TimingSimpleCPU::handleWritePacket()
     SimpleExecContext &t_info = *threadInfo[curThread];
     SimpleThread* thread = t_info.thread;
 
-    DPRINTF(SimpleCPU, "Issuing access to memory hierarchy to addr: %#x, PC: %#x, cycle: %s\n",
+#if defined (BESPOKE)
+    // [ANI] This is a workaround until we finalize on the ISA design
+    // Here, we check the PC and accordingly manipulate the pkt request type
+    // For MCS:
+    // 10d76 -- Enqueue initialization
+    // 10d7e -- Enqueue ld
+    // 10d82 -- Enqueue st (local/remote?) --> This is part of the LL/SC pair
+    // 10d8c -- Enqueue store (local)
+    // 10d96 -- Enqueue store (remote)
+    // 10da2 -- Acquire
+    // 10daa -- Acquire
+    // 10db2 -- Release
+    // 10db6 -- Transfer store (remote)
+
+    const int enqueueInit = 0x10d76;
+    const int enqueueLLPC = 0x10d7e;
+    const int enqueueSCIPC = 0x10d82; // not used
+    const int enqueueSCPC = 0x0; // 0x10d82;
+    const std::array<int, 2> enqueueWPC = {0x10d8c, 0x10d96};
+    const std::array<int, 2> acquirePC  = {0x10da2, 0x10daa};
+    const std::array<int, 2> releasePC  = {0x10db2, 0x10dce};
+    const int transferPC = 0x10db6;
+
+    if (dcache_pkt->req->getPC() == enqueueInit) {
+      DPRINTF(SimpleCPU, "Issuing enqueue initialization %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::EnqueueInitReq;
+    }
+    if (dcache_pkt->req->getPC() == enqueueLLPC) {
+      DPRINTF(SimpleCPU, "Issuing enqueue ldlinked req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::EnqueueLdLinkedReq;
+    }
+    if (dcache_pkt->req->getPC() == enqueueSCIPC) {
+      DPRINTF(SimpleCPU, "Issuing enqueue stcond req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::EnqueueStCondInvReq;
+    }
+    if (dcache_pkt->req->getPC() == enqueueSCPC) {
+      DPRINTF(SimpleCPU, "Issuing enqueue stcond req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::EnqueueStCondReq;
+    }
+    if (std::find(enqueueWPC.begin(),
+                  enqueueWPC.end(),
+                  dcache_pkt->req->getPC()) != enqueueWPC.end()) {
+      DPRINTF(SimpleCPU, "Issuing enqueue write req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::EnqueueWriteReq;
+    }
+    if (std::find(acquirePC.begin(),
+                  acquirePC.end(),
+                  dcache_pkt->req->getPC()) != acquirePC.end()) {
+      DPRINTF(SimpleCPU, "Issuing acquire write req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::AcquireReq;
+    }
+    if (std::find(releasePC.begin(),
+                  releasePC.end(),
+                  dcache_pkt->req->getPC()) != releasePC.end()) {
+      DPRINTF(SimpleCPU, "Issuing release write req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::ReleaseReq;
+    }
+    if (dcache_pkt->req->getPC() == transferPC) {
+      DPRINTF(SimpleCPU, "Issuing transfer write req %x\n", dcache_pkt->getAddr());
+      dcache_pkt->cmd = MemCmd::TransferReq;
+    }
+#endif
+
+    DPRINTF(SimpleCPU, "(HWP) Issuing access to memory hierarchy to addr: %#x, PC: %#x, cycle: %s\n",
           dcache_pkt->getAddr(), dcache_pkt->req->getPC(), curCycle());
 
     dcache_pkt->issuedCycle = curCycle();

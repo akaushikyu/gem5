@@ -167,3 +167,6 @@ DebugFlag('TokenPort')
 DebugFlag("MemChecker")
 DebugFlag("MemCheckerMonitor")
 DebugFlag("QOS")
+
+if env['CONF']['PROTOCOL'] == 'EXCL_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])

@@ -57,6 +57,9 @@ AbstractCacheEntry::AbstractCacheEntry() : ReplaceableEntry()
     m_last_touch_tick = 0;
     m_htmInReadSet = false;
     m_htmInWriteSet = false;
+#if defined (BESPOKE)
+    m_replImmune = -1;
+#endif
 }
 
 AbstractCacheEntry::~AbstractCacheEntry()
@@ -67,18 +70,41 @@ AbstractCacheEntry::~AbstractCacheEntry()
 AccessPermission
 AbstractCacheEntry::getPermission() const
 {
-    return m_Permission;
+  return m_Permission;
 }
 
 void
 AbstractCacheEntry::changePermission(AccessPermission new_perm)
 {
-    m_Permission = new_perm;
-    if ((new_perm == AccessPermission_Invalid) ||
-        (new_perm == AccessPermission_NotPresent)) {
-        m_locked = -1;
-    }
+  m_Permission = new_perm;
+  if ((new_perm == AccessPermission_Invalid) ||
+      (new_perm == AccessPermission_NotPresent)) {
+    m_locked = -1;
+  }
 }
+
+#if defined (BESPOKE)
+void
+AbstractCacheEntry::setReplImmune(int context)
+{
+  DPRINTF(RubyCache, "Setting replacement immune for addr: %#x\n", m_Address);
+  m_replImmune = context;
+}
+
+void
+AbstractCacheEntry::clearReplImmune() {
+  DPRINTF(RubyCache, "Clearing replacement immune for addr; %#x\n", m_Address);
+  m_replImmune = -1;
+}
+
+bool
+AbstractCacheEntry::isReplImmune() const
+{
+  DPRINTF(RubyCache, "Testing repl immunity for addr: %#llx %d \n",
+          m_Address, m_replImmune);
+  return m_replImmune != -1;
+}
+#endif
 
 void
 AbstractCacheEntry::setLocked(int context)
@@ -93,6 +119,7 @@ AbstractCacheEntry::clearLocked()
     DPRINTF(RubyCache, "Clear Lock for addr: %#x\n", m_Address);
     m_locked = -1;
 }
+
 
 bool
 AbstractCacheEntry::isLocked(int context) const

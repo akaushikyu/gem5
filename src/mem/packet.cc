@@ -237,18 +237,32 @@ MemCmd::commandInfo[] =
     { {IsRead, IsResponse}, InvalidCmd, "HTMReqResp" },
     { {IsRead, IsRequest}, InvalidCmd, "HTMAbort" },
     { {IsRequest}, InvalidCmd, "TlbiExtSync" },
-    /* EnqueueCmd */
-    { {IsEnqueue, NeedsWritable, IsRequest, NeedsResponse, HasData},
-            WriteResp, "EnqueueReq" },
+#if defined (BESPOKE)
+    /* EnqueueInit */
+    { {IsEnqueueInit, NeedsWritable, IsRequest, NeedsResponse, HasData},
+            WriteResp, "EnqueueInitReq"},
+    /* EnqueueWrite*/
+    { {IsEnqueueWrite, NeedsWritable, IsRequest, NeedsResponse, HasData},
+            WriteResp, "EnqueueWriteReq" },
+    /* EnqueueLdLinkedCmd */
+    { {IsEnqueueLdLinked, IsRead, IsLlsc, IsRequest, NeedsResponse, HasData},
+            WriteResp, "EnqueueLdLinkedReq" },
+    /* EnqueueStCondCmd */
+    { {IsEnqueueStCond, NeedsWritable, IsRequest, NeedsResponse, HasData},
+            WriteResp, "EnqueueStCondReq" },
+    /* EnqueueStCondInvCmd */
+    { {IsEnqueueStCondInv, NeedsWritable, IsRequest, NeedsResponse, HasData},
+            WriteResp, "EnqueueStCondInvReq" },
      /* AcquireCmd */
-    { {IsAcquire, IsRequest, NeedsResponse, HasData},
+    { {IsAcquire, IsRead, IsRequest, NeedsResponse, HasData},
             ReadResp, "AcquireReq" },
      /* ReleaseCmd */
-    { {IsRelease, IsRequest, NeedsResponse, HasData},
+    { {IsRelease, IsRead, IsRequest, NeedsResponse, HasData},
             ReadResp, "ReleaseReq" },
      /* TransferCmd */
     { {IsTransfer, NeedsWritable, IsRequest, NeedsResponse, HasData},
             WriteResp, "TransferReq" },
+#endif
 };
 
 AddrRange

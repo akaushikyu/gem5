@@ -153,6 +153,34 @@ Sequencer::~Sequencer()
 {
 }
 
+#if defined (BESPOKE)
+void
+Sequencer::setReplImmune(const Addr laddr)
+{
+  fatal_if (m_dataCache_ptr == NULL,
+        "%s must have a dcache object", name());
+
+  AbstractCacheEntry *line = m_dataCache_ptr->lookup(laddr);
+  if (line) {
+    line->setReplImmune(m_version);
+    DPRINTF(RubySequencer, "setting replacement immunity for addr=0x%lx\n", laddr);
+  }
+}
+
+void
+Sequencer::clearReplImmune(const Addr laddr)
+{
+  fatal_if (m_dataCache_ptr == NULL,
+        "%s must have a dcache object", name());
+
+  AbstractCacheEntry *line = m_dataCache_ptr->lookup(laddr);
+  if (line) {
+    line->clearReplImmune();
+    DPRINTF(RubySequencer, "clearing lock immunity for addr=0x%lx\n", laddr);
+  }
+}
+#endif
+
 void
 Sequencer::llscLoadLinked(const Addr claddr)
 {
@@ -515,8 +543,13 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
             // LL/SC support (tested with ARMv8)
             bool success = true;
 
-            if (seq_req.m_type != RubyRequestType_Store_Conditional &&
-                seq_req.m_type != RubyRequestType_ENQUEUE) {
+            if (seq_req.m_type != RubyRequestType_Store_Conditional
+#if defined (BESPOKE)
+                &&
+                seq_req.m_type != RubyRequestType_ENQUEUESC &&
+                seq_req.m_type != RubyRequestType_ENQUEUESCI
+#endif
+                ) {
                 // Regular stores to addresses being monitored
                 // will fail (remove) the monitor entry.
                 llscClearMonitor(address);
@@ -582,18 +615,29 @@ Sequencer::processReadCallback(SequencerRequest &seq_req,
 {
     if (ruby_request) {
         assert((seq_req.m_type == RubyRequestType_LD) ||
-               (seq_req.m_type == RubyRequestType_Load_Linked) ||
+               (seq_req.m_type == RubyRequestType_Load_Linked)
+#if defined (BESPOKE)
+               ||
+               (seq_req.m_type == RubyRequestType_ENQUEUELL) ||
                (seq_req.m_type == RubyRequestType_IFETCH) ||
                (seq_req.m_type == RubyRequestType_ACQUIRE) ||
-               (seq_req.m_type == RubyRequestType_RELEASE));
+               (seq_req.m_type == RubyRequestType_RELEASE)
+#endif
+               );
     }
     if ((seq_req.m_type != RubyRequestType_LD) &&
         (seq_req.m_type != RubyRequestType_Load_Linked) &&
         (seq_req.m_type != RubyRequestType_IFETCH) &&
-        (seq_req.m_type != RubyRequestType_REPLACEMENT) &&
+        (seq_req.m_type != RubyRequestType_REPLACEMENT)
+#if defined (BESPOKE)
+        &&
         (seq_req.m_type != RubyRequestType_ACQUIRE) &&
-        (seq_req.m_type != RubyRequestType_RELEASE)) {
+        (seq_req.m_type != RubyRequestType_ENQUEUELL) &&
+        (seq_req.m_type != RubyRequestType_RELEASE)
+#endif
+        ) {
         // Write request: reissue request to the cache hierarchy
+        DPRINTF(RubySequencer, "(PRC) REISSUING REQUEST TO %x\n", seq_req.pkt->req->getVaddr());
         issueRequest(seq_req.pkt, seq_req.m_second_type);
         return true;
     }
@@ -728,10 +772,27 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
     }
 
     // Load-linked handling
-    if (type == RubyRequestType_Load_Linked) {
+    if (type == RubyRequestType_Load_Linked
+#if defined (BESPOKE)
+        ||
+        type == RubyRequestType_ENQUEUELL
+#endif
+        ) {
         Addr line_addr = makeLineAddress(request_address);
         llscLoadLinked(line_addr);
     }
+
+#if defined (BESPOKE)
+    if (type == RubyRequestType_ENQUEUELL || type == RubyRequestType_ENQUEUEI) {
+      Addr line_addr = makeLineAddress(request_address);
+      setReplImmune(line_addr);
+    }
+
+    if (type == RubyRequestType_RELEASE) {
+      Addr line_addr = makeLineAddress(request_address);
+      clearReplImmune(line_addr);
+    }
+#endif
 
     DPRINTF(RubyHitMiss, "Cache %s at %#x\n",
                          externalHit ? "miss" : "hit",
@@ -746,6 +807,11 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
             (type == RubyRequestType_RMW_Read) ||
             (type == RubyRequestType_Locked_RMW_Read) ||
             (type == RubyRequestType_Load_Linked) ||
+#if defined (BESPOKE)
+            (type == RubyRequestType_ENQUEUELL) ||
+            (type == RubyRequestType_ACQUIRE) ||
+            (type == RubyRequestType_RELEASE) ||
+#endif
             (type == RubyRequestType_ATOMIC_RETURN)) {
             pkt->setData(
                 data.getData(getOffset(request_address), pkt->getSize()));
@@ -773,7 +839,13 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
             (*(pkt->getAtomicOp()))(
                 data.getDataMod(getOffset(request_address)));
             DPRINTF(RubySequencer, "AMO new data %s\n", data);
-        } else if (type != RubyRequestType_Store_Conditional || llscSuccess) {
+        } else if ((type != RubyRequestType_Store_Conditional
+#if defined (BESPOKE)
+                    &&
+                    type != RubyRequestType_ENQUEUESC &&
+                    type != RubyRequestType_ENQUEUESCI
+#endif
+                    ) || llscSuccess) {
             // Types of stores set the actual data here, apart from
             // failed Store Conditional requests
             data.setData(pkt);
@@ -982,11 +1054,19 @@ Sequencer::makeRequest(PacketPtr pkt)
         } else {
             DPRINTF(RubySequencer, "Issuing LL\n");
             assert(pkt->isRead());
-            primary_type = RubyRequestType_Load_Linked;
-            if (protocol_info.getUseSecondaryLoadLinked()) {
+#if defined (BESPOKE)
+            if (pkt->isEnqueueLdLinked()) {
+              DPRINTF(RubySequencer, "Issuing Enqueue LL\n");
+              primary_type = secondary_type = RubyRequestType_ENQUEUELL;
+            } else
+#endif
+            {
+              primary_type = RubyRequestType_Load_Linked;
+              if (protocol_info.getUseSecondaryLoadLinked()) {
                 secondary_type = RubyRequestType_Load_Linked;
-            } else {
+              } else {
                 secondary_type = RubyRequestType_LD;
+              }
             }
         }
     } else if (pkt->req->isLockedRMW()) {
@@ -1023,15 +1103,27 @@ Sequencer::makeRequest(PacketPtr pkt)
 #endif
     } else if (pkt->req->hasNoAddr()) {
         primary_type = secondary_type = RubyRequestType_hasNoAddr;
-    } else if (pkt->isEnqueue()) {
-        primary_type = secondary_type = RubyRequestType_ENQUEUE;
+    }
+#if defined (BESPOKE)
+    else if (pkt->isEnqueueLdLinked()) {
+        primary_type = secondary_type = RubyRequestType_ENQUEUELL;
+    } else if (pkt->isEnqueueStCond()) {
+        primary_type = secondary_type = RubyRequestType_ENQUEUESC;
+    } else if (pkt->isEnqueueStCondInv()) {
+        primary_type = secondary_type = RubyRequestType_ENQUEUESCI;
+    } else if (pkt->isEnqueueInit()) {
+        primary_type = secondary_type = RubyRequestType_ENQUEUEI;
+    } else if (pkt->isEnqueueWrite()) {
+        primary_type = secondary_type = RubyRequestType_ENQUEUEW;
     } else if (pkt->isAcquire()) {
         primary_type = secondary_type = RubyRequestType_ACQUIRE;
     } else if (pkt->isRelease()) {
         primary_type = secondary_type = RubyRequestType_RELEASE;
     } else if (pkt->isTransfer()) {
         primary_type = secondary_type = RubyRequestType_TRANSFER;
-    } else {
+    }
+#endif
+    else {
         //
         // To support SwapReq, we need to check isWrite() first: a SwapReq
         // should always be treated like a write, but since a SwapReq implies

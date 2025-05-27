@@ -367,8 +367,23 @@ CacheMemory::cacheProbe(Addr address) const
     int64_t cacheSet = addressToCacheSet(address);
     std::vector<ReplaceableEntry*> candidates;
     for (int i = 0; i < m_cache_assoc; i++) {
-        candidates.push_back(static_cast<ReplaceableEntry*>(
+        AbstractCacheEntry* ace = m_cache[cacheSet][i];
+#if defined (BESPOKE)
+        DPRINTF(RubyCacheTrace,
+            "Address %lx is replacement immune? %d\n", ace->m_Address, ace->isReplImmune());
+        if (!ace->isReplImmune())
+#endif
+        {
+          candidates.push_back(static_cast<ReplaceableEntry*>(
                                                        m_cache[cacheSet][i]));
+        }
+    }
+    // [ANI] Add this assert?
+    assert(candidates.size() > 0);
+
+    if (candidates.size() == 1) {
+      // only one candidate, send that back
+      return m_cache[cacheSet][candidates[0]->getWay()]->m_Address;
     }
     return m_cache[cacheSet][m_replacementPolicy_ptr->
                         getVictim(candidates)->getWay()]->m_Address;

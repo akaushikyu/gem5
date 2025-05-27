@@ -5,3 +5,6 @@ SimObject('TraceTester.py', sim_objects=['TraceTester'])
 Source('TraceTester.cc')
 
 DebugFlag('TraceTester')
+
+if env['CONF']['PROTOCOL'] == 'EXCL_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])

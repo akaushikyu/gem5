@@ -59,6 +59,8 @@ enumeration(CoherenceResponseType, desc="Types of response messages") {
 structure(ResponseMsg, desc="Response message", interface="Message") {
     Cycles                              reqID,             default="Cycles(0)", desc="Associated request ID";
     Addr                                addr,              desc="Physical address of the cache line";
+    Addr                                waddr,             desc="Physical word address of modified CL";
+    int                                 size,              desc="size in bytes of modified words";
     DataBlock                           dataBlk,           desc="Cache line data";
     bool                                dirty,             desc="Dirty bit of the cache line";
 
