@@ -79,10 +79,15 @@ class Type(Symbol):
                 self.c_ident = f"{machine}_{ident}"
 
         # TODO: do this only for a subset of protocols (PECC)
-        if f"RequestMsg" in self.c_ident or f"ResponseMsg" in self.c_ident:
-            self.shared = True
-            # remove the protocol tag
-            self.c_ident = self.c_ident.replace(r"{table.slicc.protocol}\/", "")
+        if (table.slicc.protocol == "INCL" or \
+            table.slicc.protocol == "EXCL" or \
+            table.slicc.protocol == "Baseline_LC_MSI" or \
+            table.slicc.protocol == "LC_MSI" or \
+            table.slicc.protocol == "EXCL_ql"):
+            if f"RequestMsg" in self.c_ident or f"ResponseMsg" in self.c_ident:
+                self.shared = True
+                # remove the protocol tag
+                self.c_ident = self.c_ident.replace(r"{table.slicc.protocol}\/", "")
 
         if self.shared or not table.slicc.protocol or self.isExternal:
             self.protocol_specific = ""
