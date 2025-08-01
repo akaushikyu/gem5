@@ -20,7 +20,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     Cycles cache_access_latency;
 
     // llsc lock timeout
-    Cycles llsc_lock_timeout_latency := 16;
+    Cycles llsc_lock_timeout_latency := 100;
 
     // Interface to the network
     // Bus request
@@ -69,6 +69,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
         ML_AD, AccessPermission:Busy, desc="Same as M_AD but original request is Lock instead of GetM";
         ML_D, AccessPermission:Busy, desc="Same as ML_D but original request is Lock instead of GetM";
+        ML_DI, AccessPermission:Busy, desc="Same as ML_D but original request is Lock instead of GetM";
 
         M_A, AccessPermission:Read_Only, desc="Issued Upg but has not observed Upg on bus";
         ML_A, AccessPermission:Read_Only, desc="Same as M_A but original request is Lock instead of GetM";
@@ -98,6 +99,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         R_AD, AccessPermission:Read_Only, desc="Release state, waiting for release on bus";
         R_D, AccessPermission:Read_Only, desc="Release state, waiting for updated lock data from thread in EQ_O state";
         R, AccessPermission:Read_Only, desc="Release state";
+        R_O, AccessPermission:Read_Only, desc="Release exclusive state";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -228,6 +230,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     void unset_cache_entry();
     void set_tbe(TBE b);
     void unset_tbe();
+     void wakeUpAllBuffers(Addr a);
     MachineID mapAddressToMachine(Addr addr, MachineType mtype);
 
     // External functions (included in EXCL_includes.hh)
@@ -875,11 +878,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
                 enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
                     out_msg.reqID := in_msg.reqID;
                     out_msg.addr := address;
+                    out_msg.waddr := address;
+                    out_msg.size := 64;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
                     // Only send data to requestor
                     out_msg.Destination.add(in_msg.requestor);
                     out_msg.dataBlk := cache_entry.dataBlk;
+                    DPRINTF(RubySlicc, "Sending data block: %s\n", cache_entry.dataBlk);
                     out_msg.dirty := cache_entry.dirty;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
                 }
@@ -1085,10 +1091,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     action(coalesceDataResponseToCache, desc="Coalesce data response to the cache") {
       // this does a coalesce of data on a byte granularity
-      DPRINTF(RubySlicc,
-        "ACTION: coalesceDataResponseToCache on %x, data: %s\n", address, cache_entry.dataBlk);
       peek(responseInPort, ResponseMsg) {
           assert(is_valid(cache_entry));
+          DPRINTF(RubySlicc, "ACTION: coalesceDataResponseToCache on %x %x %d, data: %s\n", address, in_msg.waddr, in_msg.size, cache_entry.dataBlk);
           cache_entry.dataBlk :=
             coalesceData(cache_entry.dataBlk, in_msg.dataBlk, in_msg.waddr, in_msg.size);
           //cache_entry.dataBlk := in_msg.dataBlk;
@@ -1121,6 +1126,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_valid(cache_entry));
         cache_entry.isEnqueued := false;
         cache_entry.isReleased := true;
+    }
+
+    action(setUnreleased, desc="") {
+        DPRINTF(RubySlicc, "ACTION: setUnReleased on %x\n", address);
+        assert(is_valid(cache_entry));
+        cache_entry.isReleased := false;
     }
 
     action(resetOwned, desc="") {
@@ -1252,6 +1263,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
             profiler.profileE2ELatency(curCycle(), tbe.cycle);
             TBEs.deallocate(address);
+            DPRINTF(RubySlicc, "ACTION: unallocateTBE on %x\n", address);
             unset_tbe();
         }
     }
@@ -1307,6 +1319,18 @@ machine(MachineType:L1Cache, "L1 Cache") :
            desc="Notify sequencer that store conditional failed") {
       sequencer.writeCallbackScFail(address, cache_entry.dataBlk);
     }
+
+    action(z_stallAndWaitRequestQueue, "\zswr",
+           desc="Stall and wait request queue") {
+      stall_and_wait(requestInPort, address);
+    }
+
+    action(kd_wakeUpDependents, "kd", desc="wake-up dependents") {
+      wakeUpAllBuffers(address);
+    }
+
+
+
 
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
@@ -1453,6 +1477,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition({SE_A,OE_A}, OwnEnqueue, CMPEQ) {
         upgStoreHit;
         setEnqueued;
+        ll_scheduleLoadLinkedLockTimeout;
         popRequestQueue;
         triggerLocalReqCompletion;
     }
@@ -1463,11 +1488,27 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popRequestQueue;
     }
 
-    transition(EQ_OI, OtherEnqueue, CMP) {
-      setToI;
+    transition(EQ_OI, OtherEnqueue, I) {
+      sendDataResponse;
+      invalidateCacheEntry;
+      popRequestQueue;
+    }
+
+    // ANI: Check why anothr thread may do a load/store on the same address
+    transition(EQ_OI, OtherGetM, I) {
+      sendDataResponse;
+      invalidateCacheEntry;
+      popRequestQueue;
+    }
+
+    transition(EQ_OI, OtherUpg, I) {
+      invalidateCacheEntry;
+      popRequestQueue;
+    }
+
+    transition(EQ_OI, OtherGetS) {
       sendDataResponse;
       popRequestQueue;
-      triggerLocalReqCompletion;
     }
 
     transition(EQ, OtherEnqueue) {
@@ -1522,7 +1563,37 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popMandatoryQueue;
     }
 
-    transition({A_O,M}, Release, R) {
+    transition({A_O}, Release, R_O) {
+      setReleased;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    // ANI: There are instances where we can come to the release state
+    // without going through the enqueue, acquire phases. One way
+    // is to have a state machine in built that only goes to release
+    // state from a known previous state. This is an optimization we will
+    // need to add....
+    // For now, repeated release operations on R should behave like <A, Release>
+    // where we have to initiate Release and read fresh data...
+    //transition(R, Release) {
+    //  allocateTBE;
+    //  initiateRelease;
+    //  sendBusRequest;
+    //  popMandatoryQueue;
+    //}
+
+    //transition({R}, BusGrantDoRelease, R_AD) {
+    //  sendRelease;
+    //  popBusGrantQueue;
+    //}
+
+    transition({R,R_O}, Release) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, Release) {
       setReleased;
       loadHit;
       popMandatoryQueue;
@@ -1579,6 +1650,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popResponseQueue;
     }
 
+    transition({R, R_O}, DataCacheToCache) {
+      coalesceDataResponseToCache;
+      popResponseQueue;
+    }
+
     transition(I, DataCacheToCache) {
       // do nothing..
       popResponseQueue;
@@ -1589,9 +1665,61 @@ machine(MachineType:L1Cache, "L1 Cache") :
       checkAndFinalizeTransaction;
     }
 
+    // ANI: Check why R needs a load event
+    transition({R,R_O}, {Load}, S) {
+        loadHit;
+        setUnreleased;
+        popMandatoryQueue;
+    }
+
+    // ANI: Check why R needs a store event
+    transition({R}, Store) {
+        allocateTBE;
+        initiateGetM;
+        sendBusRequest;
+        popMandatoryQueue;
+    }
+
+    transition({R}, BusGrantDoGetM, M_A) {
+        sendUpg;
+        popBusGrantQueue;
+    }
+
+    transition({R,R_O}, Replacement) {
+        allocateTBE;
+        initiateReplacement;
+        sendBusRequest;
+    }
+
+    transition(R, BusGrantDoPut, I_A) {
+        sendPutS;
+        popBusGrantQueue;
+    }
+
+    transition(R_O, BusGrantDoPut, I_AD) {
+        sendPutD;
+        popBusGrantQueue;
+    }
+
     transition(CMPEQ, Complete, *) {
+      // ANI TODO: Should this be replaced with
+      // checkAndFinalize?
+      deallocateTBEs;
       popTriggerQueue;
     }
+
+    transition(EQ_O, OtherPutS) {
+      popRequestQueue;
+    }
+
+    // ANI: Check this for lock event on EQ_OI
+    transition(EQ_OI, Lock, L) {
+        loadHit;
+        ll_scheduleLoadLinkedLockTimeout;
+        popMandatoryQueue;
+        setCacheLocked;
+    }
+
     // ##########################################
     // End transitions on spin lock request/phases
 
@@ -1606,7 +1734,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         sendBusRequest;
     }
 
-    transition({S, O, E, M}, {Ifetch, Load}) {
+    transition({S, O, E, M, L}, {Ifetch, Load}) {
         loadHit;
         popMandatoryQueue;
     }
@@ -1630,7 +1758,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popMandatoryQueue;
     }
 
-    transition(R, EnqueueI, M) {
+    transition({R R_O}, EnqueueI, M) {
         storeHit;
         popMandatoryQueue;
     }
@@ -1803,18 +1931,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition({M_D}, OtherGetM) {
-        checkAndAddRequestor;
-        setToI;
-        popRequestQueue;
-    }
-
-    transition({M_D}, OtherGetS) {
-        addSharer;
-        checkAndAddRequestor;
-        popRequestQueue;
-    }
-
     transition(I_D, {OtherGetM, OtherGetS, OtherPutS, OtherPutD, OtherPutO_O, OtherPutO_NO, OtherUpg}) {
         popRequestQueue;
     }
@@ -1851,6 +1967,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // Transition on finalizing transaction
     transition(CMP, Complete, *) {
         checkAndFinalizeTransaction;
+        kd_wakeUpDependents;
         popTriggerQueue;
     }
 
@@ -1859,6 +1976,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(CMPLLSC, Complete, L) {
       setCacheLocked;
+      //deallocateTBEs;
       popTriggerQueue;
     }
 
@@ -1877,12 +1995,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition({M, E}, Lock, L) {
-        allocateTBE;
-        initiateGetMLocked;
         loadHit;
         ll_scheduleLoadLinkedLockTimeout;
         popMandatoryQueue;
         setCacheLocked;
+    }
+
+    transition(L, Lock) {
+      loadHit;
+      popMandatoryQueue;
     }
 
     transition(ML_AD, OwnGetM, ML_D) {
@@ -1891,7 +2012,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(ML_D, {DataFromLLC, DataFromMem, DataCacheToCache}, CMPLLSC) {
+    transition({ML_D,ML_DI}, {DataFromLLC, DataFromMem, DataCacheToCache}, CMPLLSC) {
         writeDataResponseToCache;
         externalLoadHit;
         ll_scheduleLoadLinkedLockTimeout;
@@ -1899,16 +2020,16 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition({ML_D,L}, OtherGetM) {
-      checkAndAddRequestor;
-      setToI;
-      popRequestQueue;
+    transition({M_D, ML_D, L}, OtherGetM) {
+        checkAndAddRequestor;
+        setToI;
+        popRequestQueue;
     }
 
-    transition({ML_D,L}, OtherGetS) {
-      addSharer;
-      checkAndAddRequestor;
-      popRequestQueue;
+    transition({M_D, ML_D, L}, OtherGetS) {
+        addSharer;
+        checkAndAddRequestor;
+        popRequestQueue;
     }
 
     transition({S, O}, BusGrantDoGetMLocked, ML_A) {
@@ -1931,7 +2052,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition({M, E}, Unlock, CMP) {
       storeHit;
       popMandatoryQueue;
-      //ll_unsetLoadLinkedLockTimer;
       triggerUnlockReqCompletion;
     }
 
@@ -1944,8 +2064,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(L, LLSC_Timeout, E) {
+    transition(L, LLSC_Timeout, CMP) {
       ll_unsetLoadLinkedLockTimer;
-      checkAndFinalizeTransaction;
+      triggerUnlockReqCompletion;
     }
 }

@@ -85,19 +85,21 @@ TraceTester::readTrace(TraceElement& element) {
         element.cmd = MemCmd::ReadReq;
       }
 #if defined (BESPOKE)
-      else if (command == "E.W") {
+      else if (command == "QLI") {
+        element.cmd = MemCmd::EnqueueInitReq;
+      } else if (command == "QLE") {
         element.cmd = MemCmd::EnqueueWriteReq;
-      } else if (command == "E.LL") {
+      } else if (command == "QLLL") {
         element.cmd = MemCmd::EnqueueLdLinkedReq;
-      } else if (command == "E.SC") {
+      } else if (command == "QLSC") {
         element.cmd = MemCmd::EnqueueStCondReq;
-      } else if (command == "E.SCI") {
+      } else if (command == "QLSCI") {
         element.cmd = MemCmd::EnqueueStCondInvReq;
-      } else if (command == "A.R") {
+      } else if (command == "QLA") {
         element.cmd = MemCmd::AcquireReq;
-      } else if (command == "RL.R") {
+      } else if (command == "QLR") {
         element.cmd = MemCmd::ReleaseReq;
-      } else if (command == "T.W") {
+      } else if (command == "QLT") {
         element.cmd = MemCmd::TransferReq;
       }
 #endif

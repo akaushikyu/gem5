@@ -615,11 +615,11 @@ Sequencer::processReadCallback(SequencerRequest &seq_req,
 {
     if (ruby_request) {
         assert((seq_req.m_type == RubyRequestType_LD) ||
-               (seq_req.m_type == RubyRequestType_Load_Linked)
+               (seq_req.m_type == RubyRequestType_Load_Linked) ||
+               (seq_req.m_type == RubyRequestType_IFETCH)
 #if defined (BESPOKE)
                ||
                (seq_req.m_type == RubyRequestType_ENQUEUELL) ||
-               (seq_req.m_type == RubyRequestType_IFETCH) ||
                (seq_req.m_type == RubyRequestType_ACQUIRE) ||
                (seq_req.m_type == RubyRequestType_RELEASE)
 #endif
