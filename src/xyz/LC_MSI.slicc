@@ -1,5 +1,4 @@
-protocol "LC_MSI";
-
+protocol "LC_MSI" use_secondary_load_linked, use_secondary_store_conditional;
 include "XYZ_interfaces.slicc";
 include "LC_MSI-msg.sm";
 include "LC_MSI-cache0.sm";

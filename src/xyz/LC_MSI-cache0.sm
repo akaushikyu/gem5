@@ -5,6 +5,7 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     CacheMemory *DCache;
     bool send_evictions;
     XYZStatsObject *xyzStatsObject;
+    Cycles llsc_lock_timeout_latency := 100;
 
     MessageBuffer * requestToL1, network="To", virtual_network="4", vnet_type="prv_req";
     MessageBuffer * forwardFromL1, network="From", virtual_network="4", vnet_type="prv_req";
@@ -23,6 +24,8 @@ machine(MachineType:L0Cache, "LC_MSI cache")
                 desc="Invalid, moving to S, waiting for data";
     IM_D,   AccessPermission:Busy,
                 desc="Invalid, moving to M, waiting for acks";
+    IML_D,   AccessPermission:Busy,
+                desc="Invalid, moving to M, waiting for acks";
 
     S,      AccessPermission:Read_Only,
                 desc="Shared. Read-only, other caches may have the block";
@@ -30,6 +33,8 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     M,      AccessPermission:Read_Write,
                 desc="Modified. Read & write permissions. Owner of block";
 
+    L,      AccessPermission:Read_Write,
+                desc="Modified. Read & write permissions. Lock Owner of block";
   }
 
   enumeration(Event, desc="Cache events") {
@@ -38,6 +43,8 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     Ifetch,           desc="Load from processor";
     Store,          desc="Store from processor";
     Stall,          desc="Stall...";
+    Lock,           desc="Lock";
+    Unlock,         desc="unlock";
 
     // Internal event (only triggered from processor requests)
     Replacement,    desc="Triggered when block is chosen as victim";
@@ -50,6 +57,8 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     Data,  desc="Data from directory (acks = 0)";
     ExData,  desc="Data from directory (acks = 0)";
 
+    LLSC_Timeout,             desc="LL/SC lock timeout";
+    Failed_SC,                desc="Store conditional request failed";
   }
   structure(Entry, desc="Cache entry", interface="AbstractCacheEntry") {
     State CacheState,        desc="cache state";
@@ -70,6 +79,7 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     int cnt();
   }
   TBETable TBEs, template="<L0Cache_TBE>", constructor="m_number_of_TBEs";
+  TimerTable llscLockTimerTable;
   Tick clockEdge();
   Cycles curCycle();
 
@@ -106,14 +116,23 @@ machine(MachineType:L0Cache, "LC_MSI cache")
         return dcache;
     }
   }
-  Event mandatory_request_type_to_event(RubyRequestType type) {
+
+  Event mandatory_request_type_to_event(RubyRequestType type, Addr addr) {
     if (type == RubyRequestType:LD) {
       return Event:Load;
     } else if (type == RubyRequestType:IFETCH) {
       return Event:Ifetch;
-    } else if ((type == RubyRequestType:ST) || (type == RubyRequestType:ATOMIC)
-               || (type == RubyRequestType:Store_Conditional)) {
+    } else if ((type == RubyRequestType:ST) || 
+               (type == RubyRequestType:ATOMIC)) {
       return Event:Store;
+    } else if (type == RubyRequestType:Load_Linked) {
+      return Event:Lock;
+    } else if (type == RubyRequestType:Store_Conditional) {
+      if (!sequencer.llscCheckMonitor(addr)) {
+        return Event:Failed_SC;
+      } else {
+        return Event:Unlock;
+      }
     } else {
       error("Invalid RubyRequestType");
     }
@@ -180,6 +199,15 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   }
   out_port(request_out, RequestMsg, requestToL1);
   out_port(response_out, ResponseMsg, responseToL1);
+
+  // Use Timer
+  in_port(llscLockTimerTable_in, Addr, llscLockTimerTable, rank = 4) {
+    if (llscLockTimerTable_in.isReady(clockEdge())) {
+      Addr readyAddress := llscLockTimerTable.nextAddress();
+      trigger(Event:LLSC_Timeout, readyAddress, getCacheEntry(readyAddress),
+                TBEs.lookup(readyAddress));
+    }
+  }
 
   // in_port
   in_port(response_in, ResponseMsg, responseFromL1) {
@@ -253,13 +281,13 @@ machine(MachineType:L0Cache, "LC_MSI cache")
             // Data access
             if(is_valid(Dcache_entry)) {
                 trigger(
-                    mandatory_request_type_to_event(in_msg.Type),
+                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
                         in_msg.LineAddress, Dcache_entry, tbe);
             } else if(is_valid(Icache_entry)) {
                 trigger(Event:Replacement, in_msg.LineAddress, Icache_entry, tbe);
             } else if(DCache.cacheAvail(in_msg.LineAddress)) {
                 trigger(
-                    mandatory_request_type_to_event(in_msg.Type),
+                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
                         in_msg.LineAddress, Dcache_entry, tbe);
             } else {
                 // victim
@@ -270,6 +298,17 @@ machine(MachineType:L0Cache, "LC_MSI cache")
         }
       }
     }
+  }
+
+  // Actions for LL/SC lock transitions
+  action(ll_scheduleLoadLinkedLockTimeout, "ll", desc="Schedule LL/SC lock timeout.") {
+    DPRINTF(RubySlicc, "ACTION: ll_scheduleLoadLinkedLockTimeout on %x\n", address);
+    llscLockTimerTable.set(address, clockEdge() + cyclesToTicks(llsc_lock_timeout_latency));
+  }
+
+  action(ll_unsetLoadLinkedLockTimer, "\ll", desc="Unset LL/SC lock timer.") {
+    DPRINTF(RubySlicc, "ACTION: ll_unsetLoadLinkedLockTimer on %x\n", address);
+    llscLockTimerTable.unset(address);
   }
 
   action(sendGetS, 'gS', desc="Send GetS to the directory") {
@@ -466,6 +505,11 @@ machine(MachineType:L0Cache, "LC_MSI cache")
       response_in.dequeue(clockEdge());
   }
 
+  action(hhc_store_fail, "\hc",
+        desc="Notify sequencer that store conditional failed") {
+    sequencer.writeCallbackScFail(address, cache_entry.DataBlk);
+  }
+
   action(popForwardQueue, "pF", desc="Pop the forward queue") {
       forward_in.dequeue(clockEdge());
   }
@@ -493,6 +537,24 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   action(toc, "dtoc", desc="Start timing") {
     xyzStatsObject.toc();
   }
+
+  transition({I}, Lock, IML_D) {
+    tic;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetM;
+    popMandatoryQueue;
+  }
+
+  transition({S}, Lock, IML_D) {
+    tic;
+    deallocateCacheBlock;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetM;
+    popMandatoryQueue;
+  }
+
   transition(I, Load, IS_D) {
     tic;
     allocateDCacheBlock;
@@ -518,9 +580,15 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   transition(IS_D, {Load, Store, Replacement}) {
     stall;
   }
+
   transition({IS_D, IM_D}, Inv) {
     stall_fwd;
   }
+
+  transition(IML_D, Inv) {
+    stall_fwd;
+  }
+
   transition(IS_D, Data, S) {
     toc;
         writeDataToCache;
@@ -551,6 +619,34 @@ machine(MachineType:L0Cache, "LC_MSI cache")
       popResponseQueue;
     kd_wakeUpDependents;
   }
+
+  transition(IML_D, Data, L) {
+    toc;
+    writeDataToCache;
+    deallocateTBE;
+    externalLoadHit;
+    ll_scheduleLoadLinkedLockTimeout;
+    popResponseQueue;
+  }
+
+  transition(L, LLSC_Timeout, M) {
+    ll_unsetLoadLinkedLockTimer; 
+    kd_wakeUpDependents;
+  }
+
+  transition({I, S, M}, Failed_SC) {
+    hhc_store_fail;
+    popMandatoryQueue;
+  }
+
+
+  transition(L, Unlock, M) {
+    storeHit;
+    popMandatoryQueue;
+    kd_wakeUpDependents;
+    ll_unsetLoadLinkedLockTimer;
+  }
+
 
   transition({S, M}, {Load, Ifetch}) {
       loadHit;
@@ -599,6 +695,17 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   transition(M, Store) {
       storeHit;
       popMandatoryQueue;
+  }
+
+  transition(M, Lock, L) {
+    loadHit;
+    popMandatoryQueue;
+    ll_scheduleLoadLinkedLockTimeout;
+  }
+
+  transition(M, Unlock) {
+    storeHit;
+    popMandatoryQueue;
   }
 
   transition({I,M,S}, Stall) {
