@@ -293,6 +293,22 @@ CacheMemory::cacheAvail(Addr address) const
     return false;
 }
 
+#if defined (BESPOKE)
+AbstractCacheEntry*
+CacheMemory::allocateLineBuffer(Addr address, AbstractCacheEntry *entry) {
+  assert(address == makeLineAddress(address));
+  assert(!isTagPresent(address));
+
+  entry->initBlockSize(m_block_size);
+
+  entry->setRubySystem(m_ruby_system);
+
+  lineBuffer = entry;
+
+  return entry;
+}
+#endif
+
 AbstractCacheEntry*
 CacheMemory::allocate(Addr address, AbstractCacheEntry *entry)
 {

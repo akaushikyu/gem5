@@ -103,6 +103,11 @@ class CacheMemory : public SimObject
 
     // find an unused entry and sets the tag appropriate for the address
     AbstractCacheEntry* allocate(Addr address, AbstractCacheEntry* new_entry);
+
+#if defined (BESPOKE)
+    AbstractCacheEntry* allocateLineBuffer(Addr address, AbstractCacheEntry* new_entry);
+    AbstractCacheEntry* deallocateLineBuffer(Addr address);
+#endif
     void allocateVoid(Addr address, AbstractCacheEntry* new_entry)
     {
         allocate(address, new_entry);
@@ -184,6 +189,13 @@ class CacheMemory : public SimObject
     // The second index is the the amount associativity.
     std::unordered_map<Addr, int> m_tag_index;
     std::vector<std::vector<AbstractCacheEntry*> > m_cache;
+#if defined (BESPOKE)
+    // For cache transitions on invalid cache lines (ENQUEUEW, TRANSFER)
+    // the bespoke cache coherence mechanism simply creates a proxy cache line
+    // with the specific data bytes set and then pushes this cache line data to
+    // the system which is then coalesced by the receiver
+    AbstractCacheEntry* lineBuffer;
+#endif
 
     /** We use the replacement policies from the Classic memory system. */
     replacement_policy::Base *m_replacementPolicy_ptr;

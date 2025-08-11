@@ -39,8 +39,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // Internal trigger queue to finalize state transition
     MessageBuffer *triggerQueue;
 
-    // [TODO] For LL/SC implementation, need a timeout mechanism
-
     // Profiler
     CustomProfiler *profiler;
 
@@ -81,6 +79,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         CMP, AccessPermission:Busy, desc="Completion state";
         CMPLLSC, AccessPermission:Busy, desc="Completion state for LL/SC";
         CMPEQ, AccessPermission:Busy, desc="Completion state for EQ LL/SC";
+        EQP, AccessPermission:Busy, desc="Enqueue in progress";
+        EQP_O, AccessPermission:Busy, desc="Enqueue in progress";
 
         // Queue lock special states
         // [ANI] We may need to define an initialize modified state
@@ -186,6 +186,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool isEnqueued,        default="false", desc="Enqueued?";
         bool isReleased,        default="false", desc="Released?";
         NetDest sharers,        desc="Sharers";
+        NetDest requestors,     desc="Pending requestors";
+        bool to_I,                              desc="Indicator of invalidation";
+        bool lockCompleted,                         desc="Coherence lock request completion status";
     }
 
     // TBE
@@ -259,6 +262,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
         return cache_entry;
     }
 
+    CacheEntry allocateDLineBuffer(Addr address), return_by_pointer="yes" {
+        CacheEntry cache_entry := static_cast(CacheEntry, "pointer", L1Dcache.allocateLineBuffer(address, new CacheEntry));
+        return cache_entry;
+    }
+
     void deallocateCacheEntry(Addr address) {
         bool deallocated := false;
         if (L1Dcache.isTagPresent(address)) {
@@ -306,12 +314,18 @@ machine(MachineType:L1Cache, "L1 Cache") :
             assert(is_invalid(tbe));
             return State:I;
         }
-        // if tbe is invalid and cache entry is not enqueued state, then
+
+        // if tbe/cache entry is invalid and cache entry is not enqueued state, then
         // move to I state
         if (is_valid(tbe) && tbe.completed) {
             if (tbe.to_I && !isEnqueued) {
                 return State:I;
             }
+        }
+        if (is_valid(cache_entry)) {
+          if (cache_entry.to_I) {
+            return State:I;
+          }
         }
 
         // if the block is owned, determine uniqueness from the sharer count
@@ -583,20 +597,31 @@ machine(MachineType:L1Cache, "L1 Cache") :
                         // not trigger a replacement. From the code below, it
                         // looks like a enqueueW operation will also trigger a
                         // replacement
-                        if (L1Dcache.cacheAvail(address)) {
+
+                        // for invalid lines in transfer and enqueuew,
+                        // do not trigger replacement if the lines are unavailable
+                        // this protocol will push the data for lines not available
+                        // with a colaescing unit available in the cache controller...
+                        if (in_msg.Type == RubyRequestType:ENQUEUEW ||
+                            in_msg.Type == RubyRequestType:TRANSFER) {
+                              cache_entry := allocateDLineBuffer(address);
+                              replacementTriggered := false;
+                        } else {
+                          if (L1Dcache.cacheAvail(address)) {
                             // if cache block available, allocate a new entry
                             cache_entry := allocateDcacheEntry(address);
                             assert(is_valid(cache_entry));
-                        } else {
-                            // otherwise, select a victim for replacement
-                            Addr victim_addr := L1Dcache.cacheProbe(address);
-                            CacheEntry victim_entry := getCacheEntry(victim_addr);
-                            TBE victim_tbe := TBEs[victim_addr];
-                            assert(is_valid(victim_entry));
-                            assert(is_invalid(victim_tbe));
-                            DPRINTF(RubySlicc, "Triggering D-cache replacement on %x\n", victim_addr);
-                            trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
-                            replacementTriggered := true;
+                          } else {
+                              // otherwise, select a victim for replacement
+                              Addr victim_addr := L1Dcache.cacheProbe(address);
+                              CacheEntry victim_entry := getCacheEntry(victim_addr);
+                              TBE victim_tbe := TBEs[victim_addr];
+                              assert(is_valid(victim_entry));
+                              assert(is_invalid(victim_tbe));
+                              DPRINTF(RubySlicc, "Triggering D-cache replacement on %x\n", victim_addr);
+                              trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
+                              replacementTriggered := true;
+                            }
                         }
                     }
                 }
@@ -714,6 +739,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             out_msg.addr := address;
         }
         cache_entry.locked := false;
+        cache_entry.lockCompleted := true;
     }
 
     action(sendBusRequest, desc="...") {
@@ -958,6 +984,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
         cache_entry.dirty := true;
     }
 
+    action(bufferHit, desc="Buffer hit") {
+        DPRINTF(RubySlicc, "ACTION: bufferHit on %x\n", address);
+        DPRINTF(RubySlicc, "Before bufferHit data block %s\n", cache_entry.dataBlk);
+        assert(is_valid(cache_entry));
+        sequencer.writeCallback(address, cache_entry.dataBlk, false);
+        DPRINTF(RubySlicc, "After bufferHit data block %s\n", cache_entry.dataBlk);
+        cache_entry.dirty := true;
+    }
+
     action(externalStoreHit, desc="External store hit (was a miss)") {
         DPRINTF(RubySlicc, "ACTION: externalStoreHit on %x\n", address);
         assert(is_valid(cache_entry));
@@ -1146,6 +1181,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.to_I := true;
     }
 
+    action(csetToI, desc="") {
+        DPRINTF(RubySlicc, "ACTION: setToI on %x\n", address);
+        assert(is_valid(cache_entry));
+        cache_entry.to_I := true;
+    }
+
     action(addSharer, desc="Add requestor to sharer") {
         DPRINTF(RubySlicc, "ACTION: addSharer on %x\n", address);
         peek(requestInPort, RequestMsg) {
@@ -1192,6 +1233,17 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
+    action(ccheckAndAddRequestor, desc="Add requestor in cache entry") {
+        DPRINTF(RubySlicc, "ACTION: checkAndAddRequestor on %x\n", address);
+        assert(is_valid(cache_entry));
+        if (!cache_entry.to_I) {
+            peek(requestInPort, RequestMsg) {
+                cache_entry.requestors.add(in_msg.requestor);
+                DPRINTF(RubySlicc, "ACTION: adding requestor %d \n", in_msg.reqID);
+            }
+        }
+    }
+
     action(clearRequestor, desc="Clear requestor") {
         DPRINTF(RubySlicc, "ACTION: clearRequestor on %x\n", address);
         assert(is_valid(tbe));
@@ -1206,6 +1258,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.completed := true;
       }
       cache_entry.locked := true;
+    }
+
+    action(copyRequestorsFromTBEToCache, desc="Copy requestors recorded in TBE to cache") {
+      if (is_valid(tbe)) {
+        cache_entry.requestors.addNetDest(tbe.requestors);
+        cache_entry.to_I := tbe.to_I;
+      }
     }
 
     action(deallocateTBEs, desc="...") {
@@ -1265,7 +1324,29 @@ machine(MachineType:L1Cache, "L1 Cache") :
             TBEs.deallocate(address);
             DPRINTF(RubySlicc, "ACTION: unallocateTBE on %x\n", address);
             unset_tbe();
-        }
+        } else if (is_valid(cache_entry) && (cache_entry.lockCompleted || cache_entry.isEnqueued)) {
+            // [ANIRUDH] Do we need the checks on lockCompleted and isEnqueued?
+            int num_requestors := getNumSharer(cache_entry.requestors);
+            if (num_requestors > 0) {
+              DPRINTF(RubySlicc, "FINALIZE AND SENDING DATA to address %x to %s\n", address, cache_entry.requestors);
+              enqueue(responseOutPort, ResponseMsg, 1) {
+                // [ANIRUDH] Fix this reqID
+                out_msg.reqID := curCycle();
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:CacheToCache;
+                out_msg.sender := machineID;
+                // Only send data to requestor
+                out_msg.Destination := cache_entry.requestors;
+                out_msg.dataBlk := cache_entry.dataBlk;
+                out_msg.dirty := cache_entry.dirty;
+                out_msg.MessageSize := MessageSizeType:Response_Data;
+              }
+            }
+            if (cache_entry.to_I) {
+              deallocateCacheEntry(address);
+              unset_cache_entry();
+            }
+         }
     }
 
     // Actions on in_port
@@ -1363,6 +1444,41 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popMandatoryQueue;
     }
 
+    transition(I, BusGrantDoEnqueue, IE_AD) {
+      sendEnqueue;
+      popBusGrantQueue;
+    }
+
+    // have different transient states to react to other loads/stores accordingly
+    transition({S,O}, BusGrantDoEnqueue, OE_A) {
+      setOwned;
+      sendEnqueue;
+      popBusGrantQueue;
+    }
+
+    transition({EQP,EQP_O}, EnqueueSC, CMP) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      setEnqueued;
+      popMandatoryQueue;
+      triggerLocalReqCompletion;
+    }
+
+    transition(EQP, EnqueueSCI, CMP) {
+      csetToI;
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+      triggerRemoteReqCompletion;
+    }
+
+    transition(EQP_O, EnqueueSCI, EQ_OI) {
+      resetEnqueued;
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
     transition({EQ_O,EQ}, EnqueueSC, CMP) {
       ll_unsetLoadLinkedLockTimer;
       storeHit;
@@ -1371,13 +1487,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
       triggerLocalReqCompletion;
     }
 
-    transition(EQ, EnqueueSCI, CMP) {
-      setToI;
+    transition(EQ, EnqueueSCI, I) {
+      csetToI;
       resetEnqueued;
       ll_unsetLoadLinkedLockTimer;
       storeHit;
       popMandatoryQueue;
-      triggerLocalReqCompletion;
     }
 
     // On SCI, do not downgrade ownership
@@ -1402,7 +1517,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
       // invariant: there should exist another core
       // that has the line in a valid state
       // push the data out and pop
-      storeHit;
+      bufferHit;
       pushData;
       popMandatoryQueue;
     }
@@ -1420,18 +1535,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
       ll_scheduleLoadLinkedLockTimeout;
       loadHit;
       popMandatoryQueue;
-    }
-
-    transition(I, BusGrantDoEnqueue, IE_AD) {
-      sendEnqueue;
-      popBusGrantQueue;
-    }
-
-    // have different transient states to react to other loads/stores accordingly
-    transition({S,O}, BusGrantDoEnqueue, OE_A) {
-      setOwned;
-      sendEnqueue;
-      popBusGrantQueue;
     }
 
     // While in the middle of enqueue, if we see another enqueue then we no longer
@@ -1455,34 +1558,64 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popRequestQueue;
     }
 
-    transition(IE_D, OtherEnqueue) {
+    transition(IE_D, {OtherEnqueue,OtherGetM}) {
       popRequestQueue;
     }
 
-    transition(IEO_D, OtherEnqueue, IE_D) {
+    transition(IEO_D, {OtherEnqueue, OtherGetM}, IE_D) {
       resetOwned;
       checkAndAddRequestor;
       popRequestQueue;
     }
 
-    transition({IEO_D, IE_D}, {DataCacheToCache, DataFromLLC, DataFromMem}, CMPEQ) {
+    transition({IEO_D}, {DataCacheToCache, DataFromLLC, DataFromMem}, EQP_O) {
       setEnqueued;
       ll_scheduleLoadLinkedLockTimeout;
       writeDataResponseToCache;
       externalLoadHit;
       popResponseQueue;
-      triggerLocalReqCompletion;
+      copyRequestorsFromTBEToCache;
+      deallocateTBEs;
     }
 
-    transition({SE_A,OE_A}, OwnEnqueue, CMPEQ) {
+    transition({IE_D}, {DataCacheToCache, DataFromLLC, DataFromMem}, EQP) {
+      setEnqueued;
+      ll_scheduleLoadLinkedLockTimeout;
+      writeDataResponseToCache;
+      externalLoadHit;
+      popResponseQueue;
+      copyRequestorsFromTBEToCache;
+      deallocateTBEs;
+    }
+
+    transition({SE_A}, OwnEnqueue, EQP) {
         upgStoreHit;
         setEnqueued;
         ll_scheduleLoadLinkedLockTimeout;
         popRequestQueue;
-        triggerLocalReqCompletion;
+        copyRequestorsFromTBEToCache;
+        deallocateTBEs;
     }
 
-    transition(EQ_O, OtherEnqueue, EQ) {
+    transition({OE_A}, OwnEnqueue, EQP_O) {
+        upgStoreHit;
+        setEnqueued;
+        ll_scheduleLoadLinkedLockTimeout;
+        popRequestQueue;
+        copyRequestorsFromTBEToCache;
+        deallocateTBEs;
+    }
+
+    transition(EQP_O, {OtherEnqueue, OtherGetM}, EQP) {
+      ccheckAndAddRequestor;
+      popRequestQueue;
+    }
+
+    transition(EQP, OtherEnqueue) {
+      popRequestQueue;
+    }
+
+    transition(EQ_O, {OtherEnqueue}, EQ) {
       resetOwned;
       sendDataResponse;
       popRequestQueue;
@@ -1494,7 +1627,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popRequestQueue;
     }
 
-    // ANI: Check why anothr thread may do a load/store on the same address
+
     transition(EQ_OI, OtherGetM, I) {
       sendDataResponse;
       invalidateCacheEntry;
@@ -1569,25 +1702,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popMandatoryQueue;
     }
 
-    // ANI: There are instances where we can come to the release state
-    // without going through the enqueue, acquire phases. One way
-    // is to have a state machine in built that only goes to release
-    // state from a known previous state. This is an optimization we will
-    // need to add....
-    // For now, repeated release operations on R should behave like <A, Release>
-    // where we have to initiate Release and read fresh data...
-    //transition(R, Release) {
-    //  allocateTBE;
-    //  initiateRelease;
-    //  sendBusRequest;
-    //  popMandatoryQueue;
-    //}
-
-    //transition({R}, BusGrantDoRelease, R_AD) {
-    //  sendRelease;
-    //  popBusGrantQueue;
-    //}
-
     transition({R,R_O}, Release) {
       loadHit;
       popMandatoryQueue;
@@ -1626,7 +1740,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
       triggerLocalReqCompletion;
     }
 
-    transition({I,R}, Transfer, I) {
+    transition(I, Transfer) {
+      bufferHit;
+      pushData;
+      popMandatoryQueue;
+    }
+
+    transition({R}, Transfer, I) {
       // once transfer is initiated, send the updated data
       // to store on the bus; other cores that have the CL
       // will locally update their CLs with the new data
@@ -1645,7 +1765,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popResponseQueue;
     }
 
-    transition(A_O, DataCacheToCache, EQ_O) {
+    transition(A_O, DataCacheToCache) {
       coalesceDataResponseToCache;
       popResponseQueue;
     }
@@ -1665,14 +1785,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
       checkAndFinalizeTransaction;
     }
 
-    // ANI: Check why R needs a load event
     transition({R,R_O}, {Load}, S) {
         loadHit;
         setUnreleased;
         popMandatoryQueue;
     }
 
-    // ANI: Check why R needs a store event
     transition({R}, Store) {
         allocateTBE;
         initiateGetM;
@@ -1704,11 +1822,17 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(CMPEQ, Complete, *) {
       // ANI TODO: Should this be replaced with
       // checkAndFinalize?
+      // Running checkandfinalize is incorrect because this is
+      // still legally a LL/SC instruction pair. The only
+      // difference is that this is an atomic add that will always succeed
+      // However, sending the data before the EnqueueSC will cause two threads
+      // to be queued at the same time resulting in a deadlock
+      //checkAndFinalizeTransaction;
       deallocateTBEs;
       popTriggerQueue;
     }
 
-    transition(EQ_O, OtherPutS) {
+    transition({EQ_O,A_O}, OtherPutS) {
       popRequestQueue;
     }
 
@@ -1718,6 +1842,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         ll_scheduleLoadLinkedLockTimeout;
         popMandatoryQueue;
         setCacheLocked;
+        copyRequestorsFromTBEToCache;
     }
 
     // ##########################################
@@ -1756,6 +1881,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition({M, E}, {Store,EnqueueI}, M) {
         storeHit;
         popMandatoryQueue;
+    }
+
+    transition(L, Store) {
+      storeHit;
+      popMandatoryQueue;
     }
 
     transition({R R_O}, EnqueueI, M) {
@@ -1976,7 +2106,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(CMPLLSC, Complete, L) {
       setCacheLocked;
-      //deallocateTBEs;
+      copyRequestorsFromTBEToCache;
+      deallocateTBEs;
       popTriggerQueue;
     }
 
@@ -1999,6 +2130,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         ll_scheduleLoadLinkedLockTimeout;
         popMandatoryQueue;
         setCacheLocked;
+        copyRequestorsFromTBEToCache;
     }
 
     transition(L, Lock) {
@@ -2020,16 +2152,28 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition({M_D, ML_D, L}, OtherGetM) {
+    transition({M_D, ML_D}, {OtherGetM,OtherEnqueue}) {
         checkAndAddRequestor;
         setToI;
         popRequestQueue;
     }
 
-    transition({M_D, ML_D, L}, OtherGetS) {
+    transition(L, {OtherGetM, OtherEnqueue}) {
+      ccheckAndAddRequestor;
+      csetToI;
+      popRequestQueue;
+    }
+
+    transition({M_D, ML_D}, OtherGetS) {
         addSharer;
         checkAndAddRequestor;
         popRequestQueue;
+    }
+
+    transition(L, OtherGetS) {
+      addSharer;
+      ccheckAndAddRequestor;
+      popRequestQueue;
     }
 
     transition({S, O}, BusGrantDoGetMLocked, ML_A) {
@@ -2049,7 +2193,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerUnlockReqCompletion;
     }
 
-    transition({M, E}, Unlock, CMP) {
+    transition({M, E, O}, Unlock, CMP) {
       storeHit;
       popMandatoryQueue;
       triggerUnlockReqCompletion;
@@ -2067,5 +2211,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(L, LLSC_Timeout, CMP) {
       ll_unsetLoadLinkedLockTimer;
       triggerUnlockReqCompletion;
+    }
+
+    transition({I, S, E, M, O}, Failed_SC) {
+      hhc_store_fail;
+      popMandatoryQueue;
     }
 }

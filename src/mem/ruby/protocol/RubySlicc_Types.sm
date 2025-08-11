@@ -213,8 +213,10 @@ structure (CacheMemory, external = "yes") {
   AbstractCacheEntry getNullEntry();
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry, bool);
+  AbstractCacheEntry allocateLineBuffer(Addr, AbstractCacheEntry);
   void allocateVoid(Addr, AbstractCacheEntry);
   void deallocate(Addr);
+  void deallocateLineBuffer(Addr);
   AbstractCacheEntry lookup(Addr);
   bool isTagPresent(Addr);
   Cycles getTagLatency();

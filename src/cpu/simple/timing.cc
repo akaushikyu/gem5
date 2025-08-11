@@ -286,22 +286,22 @@ TimingSimpleCPU::handleReadPacket(PacketPtr pkt)
     // 10d7e -- Enqueue ld
     // 10d82 -- Enqueue st (local/remote?) --> This is part of the LL/SC pair
     // 10d8c -- Enqueue store (local)
-    // 10d96 -- Enqueue store (remote)
-    // 10da2 -- Acquire
-    // 10daa -- Acquire
-    // 10db2, 10dce -- Release
-    // 10dbc -- Release ll
+    // 10d96 -- Enqueue store (remote) 10d94(t1)
+    // 10da2 -- Acquire 10d96 (t1)
+    // 10daa -- Acquire 10d9e (t1)
+    // 10db2, 10dce -- Release 10da6, [10dc2 (t1) 10dc0 (t4)] 10dc6 (t4)
+    // 10dbc -- Release ll 10db0 (t1)
     // 10dc4 -- Release sc
-    // 10db6 -- Transfer store (remote)
+    // 10db6 -- Transfer store (remote) 10daa (t1) 10dc8 (t5)
 
     const int enqueueInit = 0x10d76;
     const int enqueueLLPC = 0x10d7e;
     const int enqueueSCIPC = 0x10d82; // not used
     const int enqueueSCPC = 0x0; //0x10d82;
-    const std::array<int, 2> enqueueWPC = {0x10d8c, 0x10d96};
-    const std::array<int, 2> acquirePC  = {0x10da2, 0x10daa};
-    const std::array<int, 2> releasePC  = {0x10db2, 0x10dce};
-    const int transferPC = 0x10db6;
+    const std::array<int, 2> enqueueWPC = {0x10d8c, 0x10d94};
+    const std::array<int, 2> acquirePC  = {0x10d96, 0x10d9e};
+    const std::array<int, 2> releasePC  = {0x10da6, 0x10dc2};
+    const std::array<int, 2> transferPC = {0x10daa, 0x10dc8};
 
     if (pkt->req->getPC() == enqueueInit) {
       DPRINTF(SimpleCPU, "Issuing enqueue initialization %x\n", pkt->getAddr());
@@ -337,7 +337,9 @@ TimingSimpleCPU::handleReadPacket(PacketPtr pkt)
       DPRINTF(SimpleCPU, "Issuing release write req %x\n", pkt->getAddr());
       pkt->cmd = MemCmd::ReleaseReq;
     }
-    if (pkt->req->getPC() == transferPC) {
+    if (std::find(transferPC.begin(),
+                  transferPC.end(),
+                  pkt->req->getPC()) != transferPC.end()) {
       DPRINTF(SimpleCPU, "Issuing transfer write req %x\n", pkt->getAddr());
       pkt->cmd = MemCmd::TransferReq;
     }
@@ -602,6 +604,7 @@ TimingSimpleCPU::handleWritePacket()
     // 10db2 -- Release
     // 10db6 -- Transfer store (remote)
 
+    /*
     const int enqueueInit = 0x10d76;
     const int enqueueLLPC = 0x10d7e;
     const int enqueueSCIPC = 0x10d82; // not used
@@ -610,6 +613,16 @@ TimingSimpleCPU::handleWritePacket()
     const std::array<int, 2> acquirePC  = {0x10da2, 0x10daa};
     const std::array<int, 2> releasePC  = {0x10db2, 0x10dce};
     const int transferPC = 0x10db6;
+    */
+
+    const int enqueueInit = 0x10d76;
+    const int enqueueLLPC = 0x10d7e;
+    const int enqueueSCIPC = 0x10d82; // not used
+    const int enqueueSCPC = 0x0; //0x10d82;
+    const std::array<int, 2> enqueueWPC = {0x10d8c, 0x10d94};
+    const std::array<int, 2> acquirePC  = {0x10d96, 0x10d9e};
+    const std::array<int, 2> releasePC  = {0x10da6, 0x10dc2};
+    const std::array<int, 2> transferPC = {0x10daa, 0x10dc8};
 
     if (dcache_pkt->req->getPC() == enqueueInit) {
       DPRINTF(SimpleCPU, "Issuing enqueue initialization %x\n", dcache_pkt->getAddr());
@@ -645,7 +658,9 @@ TimingSimpleCPU::handleWritePacket()
       DPRINTF(SimpleCPU, "Issuing release write req %x\n", dcache_pkt->getAddr());
       dcache_pkt->cmd = MemCmd::ReleaseReq;
     }
-    if (dcache_pkt->req->getPC() == transferPC) {
+    if (std::find(transferPC.begin(),
+                  transferPC.end(),
+                  dcache_pkt->req->getPC()) != transferPC.end()) {
       DPRINTF(SimpleCPU, "Issuing transfer write req %x\n", dcache_pkt->getAddr());
       dcache_pkt->cmd = MemCmd::TransferReq;
     }

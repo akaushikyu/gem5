@@ -18,6 +18,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // Latency
     Cycles cache_access_latency;
 
+    Cycles llsc_lock_timeout_latency := 100;
+
     // Interface to the network
     // Bus request
     MessageBuffer *busRequestOut, network="To", virtual_network="0", vnet_type="request";
@@ -117,6 +119,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
         // Internal trigger event
         Complete, desc="Completion event that finalizes state transition";
+        LLSC_Timeout,       desc="LL/SC lock timeout";
+        Failed_SC,          desc="Store conditional request failed";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -156,6 +160,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     TBETable TBEs, template="<L1Cache_TBE>", constructor="m_number_of_TBEs";
+    TimerTable llscLockTimerTable;
 
     int l2_select_low_bit, default="m_ruby_system->RubySystem::getBlockSizeBits()";
 
@@ -167,6 +172,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     Cycles curCycle();
     Tick clockEdge();
     Cycles ticksToCycles(Tick t);
+    Tick cyclesToTicks(Cycles c);
     void set_cache_entry(AbstractCacheEntry a);
     void unset_cache_entry();
     void set_tbe(TBE b);
@@ -328,6 +334,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
     out_port(requestOutPort, RequestMsg, requestOut);
     out_port(responseOutPort, ResponseMsg, responseOut);
     out_port(triggerOutPort, TriggerMsg, triggerQueue);
+
+    // Use Timer
+    in_port(llscLockTimerTable_in, Addr, llscLockTimerTable, rank = 4) {
+      if (llscLockTimerTable_in.isReady(clockEdge())) {
+        Addr readyAddress := llscLockTimerTable.nextAddress();
+        trigger(Event:LLSC_Timeout, readyAddress, getCacheEntry(readyAddress),
+                TBEs.lookup(readyAddress));
+      }
+    }
 
     // internally triggered event for finalizing state transition
     in_port(triggerInPort, TriggerMsg, triggerQueue) {
@@ -496,15 +511,27 @@ machine(MachineType:L1Cache, "L1 Cache") :
                         DPRINTF(RubySlicc, "WRITE OPERATION TO ADDR: %x\n", in_msg.LineAddress);
                         trigger(Event:Store, in_msg.LineAddress, cache_entry, tbe);
                     } else if (
-                        in_msg.Type == RubyRequestType:Locked_RMW_Read
+                        in_msg.Type == RubyRequestType:Locked_RMW_Read ||
+                        in_msg.Type == RubyRequestType:Load_Linked
                     ) {
                         DPRINTF(RubySlicc, "Trigger lock event\n");
                         trigger(Event:Lock, in_msg.LineAddress, cache_entry, tbe);
                     } else if (
-                        in_msg.Type == RubyRequestType:Locked_RMW_Write
+                        in_msg.Type == RubyRequestType:Locked_RMW_Write ||
+                        in_msg.Type == RubyRequestType:Store_Conditional
                     ) {
-                        DPRINTF(RubySlicc, "Trigger unlock event\n");
-                        trigger(Event:Unlock, in_msg.LineAddress, cache_entry, tbe);
+                        if (in_msg.Type == RubyRequestType:Store_Conditional) {
+                          if (!sequencer.llscCheckMonitor(in_msg.LineAddress)) {
+                            trigger(Event:Failed_SC, in_msg.LineAddress,
+                              cache_entry, TBEs[in_msg.LineAddress]);
+                          } else {
+                            DPRINTF(RubySlicc, "Trigger unlock event\n");
+                            trigger(Event:Unlock, in_msg.LineAddress, cache_entry, tbe);
+                          }
+                        } else {
+                            DPRINTF(RubySlicc, "Trigger unlock event\n");
+                            trigger(Event:Unlock, in_msg.LineAddress, cache_entry, tbe);
+                        }
                     } else {
                         DPRINTF(RubySlicc, "Unexpected request from processor %s\n", RubyRequestType_to_string(in_msg.Type));
                         error("Unexpected request from processor");
@@ -519,6 +546,17 @@ machine(MachineType:L1Cache, "L1 Cache") :
     ////////////////////////////////////////////////////////////////////////////
 
     // Actions on out_port
+
+    // Actions for LL/SC lock transitions
+    action(ll_scheduleLoadLinkedLockTimeout, "ll", desc="Schedule LL/SC lock timeout.") {
+      DPRINTF(RubySlicc, "ACTION: ll_scheduleLoadLinkedLockTimeout on %x\n", address);
+      llscLockTimerTable.set(address, clockEdge() + cyclesToTicks(llsc_lock_timeout_latency));
+    }
+
+    action(ll_unsetLoadLinkedLockTimer, "\ll", desc="Unset LL/SC lock timer.") {
+      DPRINTF(RubySlicc, "ACTION: ll_unsetLoadLinkedLockTimer on %x\n", address);
+      llscLockTimerTable.unset(address);
+    }
 
     action(triggerRemoteReqCompletion, desc="...") {
         enqueue(triggerOutPort, TriggerMsg, 0) {
@@ -932,6 +970,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_valid(cache_entry));
     }
 
+    action(hhc_store_fail, "\hc",
+           desc="Notify sequencer that store conditional failed") {
+      sequencer.writeCallbackScFail(address, cache_entry.dataBlk);
+    }
+
     action(assertCacheEntryInvalid, desc="...") {
         assert(is_invalid(cache_entry));
     }
@@ -987,7 +1030,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition({M, E}, Lock, L) {
         allocateTBE;
         initiateGetMLocked;
-        storeHit;
+        ll_scheduleLoadLinkedLockTimeout;
+        loadHit;
         popMandatoryQueue;
     }
 
@@ -1008,7 +1052,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(L, Unlock, CMP) {
         storeHit;
         popMandatoryQueue;
+        ll_unsetLoadLinkedLockTimer;
         triggerLocalReqCompletion;
+    }
+
+    transition({M, E, O}, Unlock, CMP) {
+        storeHit;
+        popMandatoryQueue;
+        // hack: no tbe available, just send the complete bus event
+        triggerRemoteReqCompletion;
     }
 
     // Transitions on observing other coherence requests in stable states
@@ -1101,7 +1153,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition({E, M}, BusGrantDoGetMLocked, L) {
-        upgStoreHit;
+        loadHit;
         popBusGrantQueue;
     }
 
@@ -1133,6 +1185,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
+    transition(L, Lock) {
+        loadHit;
+        popMandatoryQueue;
+    }
+
     transition(ML_AD, OwnGetM, ML_D) {
         setSharer;
         setOwned;
@@ -1150,7 +1207,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(ML_A, OwnUpg, L) {
         setSharer;
         setOwned;
-        upgStoreHit;
+        ll_scheduleLoadLinkedLockTimeout;
+        loadHit;
         popRequestQueue;
     }
 
@@ -1247,7 +1305,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(ML_D, {DataFromLLC, DataFromMem, DataCacheToCache}, L) {
         writeDataResponseToCache;
-        externalStoreHit;
+        externalLoadHit;
+        ll_scheduleLoadLinkedLockTimeout;
         popResponseQueue;
     }
 
@@ -1256,6 +1315,16 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(CMP, Complete, *) {
         checkAndFinalizeTransaction;
         popTriggerQueue;
+    }
+
+    transition(L, LLSC_Timeout, CMP) {
+      ll_unsetLoadLinkedLockTimer;
+      triggerLocalReqCompletion;
+    }
+
+    transition({I, S, E, M, O}, Failed_SC) {
+      hhc_store_fail;
+      popMandatoryQueue;
     }
 
 }
