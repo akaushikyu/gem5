@@ -639,7 +639,6 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     popMandatoryQueue;
   }
 
-
   transition(L, Unlock, M) {
     storeHit;
     popMandatoryQueue;
@@ -647,6 +646,10 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     ll_unsetLoadLinkedLockTimer;
   }
 
+  transition(L, {Lock,Load}) {
+    loadHit;
+    popMandatoryQueue;
+  }
 
   transition({S, M}, {Load, Ifetch}) {
       loadHit;
@@ -710,5 +713,13 @@ machine(MachineType:L0Cache, "LC_MSI cache")
 
   transition({I,M,S}, Stall) {
     stall;
+  }
+
+  transition(L, Replacement) {
+    stall;
+  }
+
+  transition(L, Inv) {
+    stall_fwd;
   }
 }
