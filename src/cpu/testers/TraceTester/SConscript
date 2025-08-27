@@ -8,3 +8,6 @@ DebugFlag('TraceTester')
 
 if env['CONF']['PROTOCOL'] == 'EXCL_ql':
   env.Append(CPPDEFINES=['BESPOKE'])
+
+if env['CONF']['PROTOCOL'] == 'LC_MSI_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])

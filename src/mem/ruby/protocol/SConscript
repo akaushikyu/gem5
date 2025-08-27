@@ -95,7 +95,7 @@ def slicc_emitter(target, source, env):
         for f in sorted(slicc.files()):
           fileName = str(f)
           if ("RequestMsg" in fileName or "ResponseMsg" in fileName):
-            fileName = re.sub(r'INCL/|EXCL/|Baseline_LC_MSI/|LC_MSI/|EXCL_ql/', "", fileName)
+            fileName = re.sub(r'INCL/|EXCL/|Baseline_LC_MSI/|LC_MSI/|LC_MSI_ql/|EXCL_ql/', "", fileName)
           files.update([output_dir.File(fileName)])
 
         # Dynamically determine protocol and add ProtocolInfo.hh to the list of

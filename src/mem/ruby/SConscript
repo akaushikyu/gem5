@@ -94,6 +94,9 @@ def MakeInclude(source):
 if env['CONF']['PROTOCOL'] == 'EXCL_ql':
   env.Append(CPPDEFINES=['BESPOKE'])
 
+if env['CONF']['PROTOCOL'] == 'LC_MSI_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])
+
 MakeInclude('slicc_interface/AbstractCacheEntry.hh')
 MakeInclude('slicc_interface/Message.hh')
 MakeInclude('slicc_interface/RubyRequest.hh')

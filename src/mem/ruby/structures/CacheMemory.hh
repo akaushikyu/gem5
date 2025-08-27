@@ -106,7 +106,9 @@ class CacheMemory : public SimObject
 
 #if defined (BESPOKE)
     AbstractCacheEntry* allocateLineBuffer(Addr address, AbstractCacheEntry* new_entry);
+    AbstractCacheEntry* allocateLineBuffer(Addr address, AbstractCacheEntry* new_entry, int coreID);
     AbstractCacheEntry* deallocateLineBuffer(Addr address);
+    AbstractCacheEntry* getLineBuffer();
 #endif
     void allocateVoid(Addr address, AbstractCacheEntry* new_entry)
     {
@@ -195,6 +197,8 @@ class CacheMemory : public SimObject
     // with the specific data bytes set and then pushes this cache line data to
     // the system which is then coalesced by the receiver
     AbstractCacheEntry* lineBuffer;
+    // For ZIV LLC, we may need a line buffer per core resulting in line buffer array
+    AbstractCacheEntry* lineBufferArr[16];
 #endif
 
     /** We use the replacement policies from the Classic memory system. */

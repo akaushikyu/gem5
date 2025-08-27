@@ -39,6 +39,9 @@ if  env['CONF']['PROTOCOL'] == 'EXCL' or \
 if env['CONF']['PROTOCOL'] == 'LC_MSI':
     env.Append(CPPDEFINES=['ZCLLC'])
 
+if env['CONF']['PROTOCOL'] == 'LC_MSI_ql':
+    env.Append(CPPDEFINES=['ZCLLC'])
+
 SimObject('BasicLink.py', sim_objects=[
     'BasicLink', 'BasicExtLink', 'BasicIntLink'])
 SimObject('BasicRouter.py', sim_objects=['BasicRouter'])

@@ -27,3 +27,7 @@
 config RUBY_PROTOCOL_LC_MSI
     bool "LC_MSI"
     default n
+
+config RUBY_PROTOCOL_LC_MSI_ql
+    bool "LC_MSI_ql"
+    default n

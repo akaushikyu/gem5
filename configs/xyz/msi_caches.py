@@ -39,7 +39,11 @@ class MyCacheSystem(RubySystem):
         return bits
 
     def __init__(self):
-        if buildEnv["PROTOCOL"] not in ["LC_MSI", "Baseline_LC_MSI"]:
+        if buildEnv["PROTOCOL"] not in [
+            "LC_MSI",
+            "LC_MSI_ql",
+            "Baseline_LC_MSI",
+        ]:
             fatal("This system assumes MSI from learning gem5!")
 
         super().__init__()

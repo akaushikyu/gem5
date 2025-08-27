@@ -124,6 +124,9 @@ if env['CONF']['USE_CAPSTONE']:
 if env['CONF']['PROTOCOL'] == 'EXCL_ql':
   env.Append(CPPDEFINED=['BESPOKE'])
 
+if env['CONF']['PROTOCOL'] == 'LC_MSI_ql':
+  env.Append(CPPDEFINED=['BESPOKE'])
+
 SimObject('DummyChecker.py', sim_objects=['DummyChecker'])
 Source('checker/cpu.cc')
 DebugFlag('Checker')

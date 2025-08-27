@@ -212,8 +212,9 @@ TimingSimpleCPU::activateContext(ThreadID thread_num)
     assert(thread_num < numThreads);
 
     threadInfo[thread_num]->execContextStats.notIdleFraction = 1;
-    if (_status == BaseSimpleCPU::Idle)
+    if (_status == BaseSimpleCPU::Idle) {
         _status = BaseSimpleCPU::Running;
+    }
 
     // kick things off by initiating the fetch of the next instruction
     if (!fetchEvent.scheduled())

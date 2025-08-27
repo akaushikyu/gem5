@@ -214,6 +214,7 @@ structure (CacheMemory, external = "yes") {
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry, bool);
   AbstractCacheEntry allocateLineBuffer(Addr, AbstractCacheEntry);
+  AbstractCacheEntry getLineBuffer();
   void allocateVoid(Addr, AbstractCacheEntry);
   void deallocate(Addr);
   void deallocateLineBuffer(Addr);

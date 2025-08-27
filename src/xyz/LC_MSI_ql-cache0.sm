@@ -35,6 +35,27 @@ machine(MachineType:L0Cache, "LC_MSI cache")
 
     L,      AccessPermission:Read_Write,
                 desc="Modified. Read & write permissions. Lock Owner of block";
+
+    // Queue lock special states
+    // [ANI] We may need to define an initialize modified state
+    // this will insulate the initialize modified state from replacement
+    IE_AD, AccessPermission:Invalid, desc="Transient state, from I -> EQ";
+    IE_D, AccessPermission:Invalid, desc="Transient state after seeing own enqueue I -> EQ";
+    IEO_D, AccessPermission:Invalid, desc="Transient state after seeing own enqueue I -> EQ_O";
+    OE_A, AccessPermission:Read_Only, desc="Transient state from O -> EQ";
+    SE_A, AccessPermission:Read_Only, desc="Transient state from O/S -> EQ";
+    EQ, AccessPermission:Read_Write, desc="Enqueue state, multiple cores can be in this state";
+    EQ_O, AccessPermission:Read_Write, desc="Enqueue owned state, only one core can be in this state";
+    EQ_OI, AccessPermission:Read_Write, desc="Enqueue owned state, only one core can be in this state, after seeing another enqueue, move to I";
+    A, AccessPermission:Read_Only, desc="Acquire state, only one core can be in this state";
+    TA, AccessPermission:Read_Only, desc="Try-Acquire state, only one core can be in this state";
+    A_O, AccessPermission:Read_Only, desc="Acquire owned state, only one core can be in this state";
+    R_AD, AccessPermission:Read_Only, desc="Release state, waiting for release on bus";
+    R_D, AccessPermission:Read_Only, desc="Release state, waiting for updated lock data from thread in EQ_O state";
+    R, AccessPermission:Read_Only, desc="Release state";
+    R_O, AccessPermission:Read_Only, desc="Release exclusive state";
+    EQP, AccessPermission:Busy, desc="Enqueue in progress";
+    EQP_O, AccessPermission:Busy, desc="Enqueue in progress";
   }
 
   enumeration(Event, desc="Cache events") {
@@ -59,10 +80,32 @@ machine(MachineType:L0Cache, "LC_MSI cache")
 
     LLSC_Timeout,             desc="LL/SC lock timeout";
     Failed_SC,                desc="Store conditional request failed";
+
+    // Queue lock events generated in mandatory queue
+    EnqueueLL, desc="";                        // enqueue store operations
+    EnqueueSC, desc="";
+    EnqueueSCI, desc="";                        // enqueue lock operations
+    EnqueueI, desc="";                          // enqueue initialization operation
+    EnqueueW, desc="";                        // enqueue lock operations
+    Acquire, desc="";                          // acquire lock operations
+    TryAcquire, desc="";                       // try acquire lock operations
+    Release, desc="";                          // release lock operations
+    Transfer, desc="";                         // release lock operations
+
+    // Triggering events
+    OwnEnqueue, desc="";                       // own enqueue lock operation
+    OtherEnqueue, desc="";                     // other enqueue lock operation
+    OwnAcquire, desc="";                       // own acquire; there is no otherAcquire
+    OwnRelease, desc="";                       // own release
+    OtherRelease, desc="";                     // other release
   }
+
   structure(Entry, desc="Cache entry", interface="AbstractCacheEntry") {
     State CacheState,        desc="cache state";
     DataBlock DataBlk,       desc="Data in the block";
+
+    bool isEnqueued,         desc="enqueued";
+    bool isReleased,         desc="released";
   }
 
   structure(TBE, desc="Entry for transient requests") {
@@ -92,6 +135,7 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   void wakeUpBuffers(Addr a);
   void wakeUpAllBuffers();
   void heheheheh();
+  DataBlock coalesceData(DataBlock a, DataBlock b, Addr waddr, int size);
 
   // void hehehe();
   MachineID mapAddressToMachine(Addr addr, MachineType mtype);
@@ -117,6 +161,11 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     }
   }
 
+  Entry allocateDLineBuffer(Addr address), return_by_pointer="yes" {
+    Entry cache_entry := static_cast(Entry, "pointer", DCache.allocateLineBuffer(address, new Entry));
+    return cache_entry;
+  }
+
   Event mandatory_request_type_to_event(RubyRequestType type, Addr addr) {
     if (type == RubyRequestType:LD) {
       return Event:Load;
@@ -133,6 +182,32 @@ machine(MachineType:L0Cache, "LC_MSI cache")
       } else {
         return Event:Unlock;
       }
+    } else if (type == RubyRequestType:ENQUEUELL) {
+      DPRINTF(RubySlicc, "Trigger lock enqueue load event\n");
+      return Event:EnqueueLL;
+    } else if (type == RubyRequestType:ENQUEUESCI ||
+               type == RubyRequestType:ENQUEUESC) {
+        if (!sequencer.llscCheckMonitor(addr)) {
+          return Event:Failed_SC;
+        } else {
+          if (type == RubyRequestType:ENQUEUESCI) {
+            return Event:EnqueueSCI;
+          } else {
+            return Event:EnqueueSC;
+          }
+        }
+    } else if (type == RubyRequestType:ENQUEUEI) {
+        return Event:EnqueueI;
+    } else if (type == RubyRequestType:ENQUEUEW) {
+        return Event:EnqueueW;
+    } else if (type == RubyRequestType:TRYACQUIRE) {
+        return Event:TryAcquire;
+    } else if (type == RubyRequestType:ACQUIRE) {
+        return Event:Acquire;
+    } else if (type == RubyRequestType:RELEASE) {
+        return Event:Release;
+    } else if (type == RubyRequestType:TRANSFER) {
+        return Event:Transfer;
     } else {
       error("Invalid RubyRequestType");
     }
@@ -215,7 +290,9 @@ machine(MachineType:L0Cache, "LC_MSI cache")
           peek(response_in, ResponseMsg) { // in_msg is implied
                 Entry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
-                assert(is_valid(tbe));
+                // [ANIRUDH] Removing below assert as we may get a broadcast
+                // data when remote core is pushing data
+                //assert(is_valid(tbe));
 
                 if (in_msg.Type == CoherenceResponseType:Data) {
                     trigger(Event:Data, in_msg.addr, cache_entry,
@@ -278,27 +355,43 @@ machine(MachineType:L0Cache, "LC_MSI cache")
                 }
             }
         } else {
-            // Data access
-            if(is_valid(Dcache_entry)) {
-                trigger(
-                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
-                        in_msg.LineAddress, Dcache_entry, tbe);
-            } else if(is_valid(Icache_entry)) {
-                trigger(Event:Replacement, in_msg.LineAddress, Icache_entry, tbe);
-            } else if(DCache.cacheAvail(in_msg.LineAddress)) {
-                trigger(
-                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
-                        in_msg.LineAddress, Dcache_entry, tbe);
+            if (in_msg.Type == RubyRequestType:ENQUEUEW ||
+                in_msg.Type == RubyRequestType:TRANSFER) {
+                if (is_invalid(Dcache_entry)) {
+                  // [ANIRUDH] Check if cache line is invalid
+                  // [TODO]
+                  DPRINTF(RubySlicc,"ALLOCATING DLINE BUFFER L0\n");
+                  Dcache_entry := allocateDLineBuffer(in_msg.LineAddress);
+                  Dcache_entry.CacheState := State:I;
+                  trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                    in_msg.LineAddress, Dcache_entry, tbe);
+                } else {
+                  trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                    in_msg.LineAddress, Dcache_entry, tbe);
+                }
             } else {
+              // Data access
+              if(is_valid(Dcache_entry)) {
+                trigger(
+                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                        in_msg.LineAddress, Dcache_entry, tbe);
+              } else if(is_valid(Icache_entry)) {
+                trigger(Event:Replacement, in_msg.LineAddress, Icache_entry, tbe);
+              }  else if(DCache.cacheAvail(in_msg.LineAddress)) {
+                trigger(
+                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                        in_msg.LineAddress, Dcache_entry, tbe);
+              } else {
                 // victim
                 Addr addr := DCache.cacheProbe(in_msg.LineAddress);
                 check_on_cache_probe(mandatory_in, addr);
                 trigger(Event:Replacement, addr, getDCacheEntry(addr), TBEs[addr]);
+              }
             }
+          }
         }
       }
     }
-  }
 
   // Actions for LL/SC lock transitions
   action(ll_scheduleLoadLinkedLockTimeout, "ll", desc="Schedule LL/SC lock timeout.") {
@@ -334,6 +427,21 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     }
   }
 
+  action(sendPushData, "seql", desc="Send push data to the directory") {
+    peek(mandatory_in, RubyRequest) {
+      enqueue(request_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:PushData;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.MessageSize := MessageSizeType:Control;
+        out_msg.Requestor := machineID;
+        out_msg.is_reordered := false;
+        out_msg.size := in_msg.Size;
+        out_msg.waddr := in_msg.PhysicalAddress;
+    }
+   }
+  }
+
   action(sendPutS, "pS", desc="Send PutS to the directory") {
       assert(is_valid(cache_entry));
       enqueue(request_out, RequestMsg, 1) {
@@ -344,6 +452,19 @@ machine(MachineType:L0Cache, "LC_MSI cache")
         out_msg.Requestor := machineID;
         out_msg.is_reordered := false;
       }
+  }
+
+  action(setUnreleased, desc="") {
+    DPRINTF(RubySlicc, "ACTION: setUnReleased on %x\n", address);
+    assert(is_valid(cache_entry));
+    cache_entry.isReleased := false;
+  }
+
+  action(setReleased, desc="") {
+    DPRINTF(RubySlicc, "ACTION: setReleased on %x\n", address);
+    assert(is_valid(cache_entry));
+    cache_entry.isEnqueued := false;
+    cache_entry.isReleased := true;
   }
 
   action(sendPutM, "pM", desc="Send putM+data to the directory") {
@@ -368,6 +489,18 @@ machine(MachineType:L0Cache, "LC_MSI cache")
           out_msg.MessageSize := MessageSizeType:Data;
       }
   }
+
+  action(sendPushDataD, "sPDD", desc="Send putM+data to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(response_out, ResponseMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceResponseType:PushData;
+          out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+          out_msg.DataBlk := cache_entry.DataBlk;
+          out_msg.MessageSize := MessageSizeType:Data;
+      }
+  }
+
   action(sendCacheDataToReq, "cdR", desc="Send cache data to requestor") {
     assert(is_valid(cache_entry));
     // in_message & out_message
@@ -538,6 +671,28 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     xyzStatsObject.toc();
   }
 
+  action(bufferHit, desc="Buffer hit") {
+    DPRINTF(RubySlicc, "ACTION: bufferHit on %x\n", address);
+    DPRINTF(RubySlicc, "Before bufferHit data block %s\n", cache_entry.DataBlk);
+    assert(is_valid(cache_entry));
+    sequencer.writeCallback(address, cache_entry.DataBlk, false);
+    DPRINTF(RubySlicc, "After bufferHit data block %s\n", cache_entry.DataBlk);
+  }
+
+  action(coalesceDataResponseToCache, desc="Coalesce data response to the cache") {
+    // this does a coalesce of data on a byte granularity
+    peek(response_in, ResponseMsg) { // in_msg is implied
+      assert(is_valid(cache_entry));
+      DPRINTF(RubySlicc, "ACTION: coalesceDataResponseToCache on %x %x %d, data: %s\n", address, in_msg.waddr, in_msg.size, cache_entry.DataBlk);
+      cache_entry.DataBlk :=
+        coalesceData(cache_entry.DataBlk, in_msg.DataBlk, in_msg.waddr, in_msg.size);
+    }
+    DPRINTF(RubySlicc,
+        "Data blk after action: %s\n", cache_entry.DataBlk);
+   }
+
+ // ###############################################################
+
   transition({I}, Lock, IML_D) {
     tic;
     allocateDCacheBlock;
@@ -562,6 +717,7 @@ machine(MachineType:L0Cache, "LC_MSI cache")
     sendGetS;
     popMandatoryQueue;
   }
+
   transition(I, Ifetch, IS_D) {
     tic;
     allocateICacheBlock;
@@ -722,4 +878,263 @@ machine(MachineType:L0Cache, "LC_MSI cache")
   transition(L, Inv) {
     stall_fwd;
   }
+
+  // Begin transitions on spin lock request/phases
+  // ##############################################
+
+    transition({I}, EnqueueLL, IEO_D) {
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition({S}, EnqueueLL, IEO_D) {
+      deallocateCacheBlock;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition(IEO_D, Data, EQP_O) {
+      ll_scheduleLoadLinkedLockTimeout;
+      writeDataToCache;
+      deallocateTBE;
+      externalLoadHit;
+      popResponseQueue;
+    }
+
+    transition(IE_D, Data, EQP) {
+      ll_scheduleLoadLinkedLockTimeout;
+      writeDataToCache;
+      deallocateTBE;
+      externalLoadHit;
+      popResponseQueue;
+    }
+
+    transition(I, EnqueueI, IM_D) {
+      tic;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition(M, EnqueueW, EQ_O) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    // [ANIRUDH] Can this happen....?
+    // [TODO]
+    transition(EQ_OI, EnqueueLL, EQP_O) {
+      ll_scheduleLoadLinkedLockTimeout;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, EnqueueLL, EQP_O) {
+      ll_scheduleLoadLinkedLockTimeout;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, EnqueueI) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQP_O, EnqueueSC, EQ_O) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQP, EnqueueSC, EQ) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQP_O, EnqueueSCI, EQ_OI) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQ_OI, Inv, I) {
+      sendWBData;
+      deallocateCacheBlock;
+      popForwardQueue;
+      forwardEviction;
+    }
+
+    transition(EQP, EnqueueSCI, I) {
+      storeHit;
+      ll_unsetLoadLinkedLockTimer;
+      deallocateCacheBlock;
+      forwardEviction;
+      popMandatoryQueue;
+    }
+
+    transition(I, {EnqueueW,Transfer}) {
+      // an enqueue write command on an invalid line
+      // invariant: there should exist another core
+      // that has the line in a valid state
+      // push the data out and pop
+      bufferHit;
+      sendPushDataD;
+      sendPushData;
+      popMandatoryQueue;
+    }
+
+    transition(EQ, Acquire, A) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQ_O, Acquire, A_O) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(A_O, Acquire) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(A, Acquire, TA) {
+      // we tried acquire again without seeing a release in between
+      // this means we have not acquired, rather trying to acquire
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(TA, Acquire) {
+      // remain in the same state
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition({A,I}, Release, R_D) {
+      allocateTBE;
+      sendGetS;
+      popMandatoryQueue;
+    }
+
+    transition({A_O}, Release, R_O) {
+      setReleased;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition({R,R_O}, Release) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, Release) {
+      setReleased;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(R_D, Data, R) {
+      setReleased;
+      deallocateTBE;
+      writeDataToCache;
+      externalLoadHit;
+      popResponseQueue;
+    }
+
+    transition({R}, Transfer, I) {
+      // once transfer is initiated, send the updated data
+      // to store on the bus; other cores that have the CL
+      // will locally update their CLs with the new data
+      storeHit;
+      // [TODO] We need to send the writeback data (sendWBData)
+      sendWBData;
+      sendPushData;
+      popMandatoryQueue;
+    }
+
+    transition({EQ,EQ_O,M}, {Data,ExData}) {
+      coalesceDataResponseToCache;
+      //writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition(TA, Data, EQ) {
+      writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition(A_O, {ExData,Data}) {
+      coalesceDataResponseToCache;
+      //writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition({R, R_O}, {ExData,Data}) {
+      coalesceDataResponseToCache;
+      //writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition(I, Data) {
+      // do nothing..
+      popResponseQueue;
+    }
+
+    transition({EQ,EQ_O}, LLSC_Timeout) {
+      ll_unsetLoadLinkedLockTimer;
+    }
+
+    transition({R}, {Load}, S) {
+        loadHit;
+        setUnreleased;
+        popMandatoryQueue;
+    }
+
+    transition({R_O}, {Load}, M) {
+        loadHit;
+        setUnreleased;
+        popMandatoryQueue;
+    }
+
+    transition({R}, Store, IM_D) {
+     deallocateCacheBlock;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition({R, R_O}, EnqueueI, M) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition({R,R_O}, Replacement, I) {
+        deallocateCacheBlock;
+        forwardEviction;
+    }
+
+    // ANI: Check this for lock event on EQ_OI
+    transition(EQ_OI, Lock, L) {
+        loadHit;
+        ll_scheduleLoadLinkedLockTimeout;
+        popMandatoryQueue;
+    }
+
+    transition({EQ,EQ_O}, EnqueueW) {
+      storeHit;
+      // [ANIRUDH] Do we need sendPushData here...?
+      sendPushDataD;
+      sendPushData;
+      popMandatoryQueue;
+    }
+
+  // ##############################################
 }

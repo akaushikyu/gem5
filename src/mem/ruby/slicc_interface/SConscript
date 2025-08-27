@@ -36,6 +36,9 @@ SimObject('Controller.py', sim_objects=['RubyController'])
 if env['CONF']['PROTOCOL'] == 'EXCL_ql':
   env.Append(CPPDEFINES=['BESPOKE'])
 
+if env['CONF']['PROTOCOL'] == 'LC_MSI_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])
+
 Source('AbstractController.cc')
 Source('AbstractCacheEntry.cc')
 Source('RubyRequest.cc')
