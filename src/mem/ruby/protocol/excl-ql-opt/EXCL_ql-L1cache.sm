@@ -1437,6 +1437,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
       popRequestQueue;
     }
 
+    // [ANIRUDH] There might be a case where
+    // we have see a enqueueLL on L state....
+
     transition({I,O,S}, EnqueueLL) {
       allocateTBE;
       initiateEnqueue;
@@ -1508,6 +1511,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition({EQ_O,EQ}, EnqueueW) {
       storeHit;
+      // [ANIRUDH] Do we need pushData here...?
       pushData;
       popMandatoryQueue;
     }
@@ -1785,7 +1789,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
       checkAndFinalizeTransaction;
     }
 
-    transition({R,R_O}, {Load}, S) {
+    transition({R}, {Load}, S) {
+        loadHit;
+        setUnreleased;
+        popMandatoryQueue;
+    }
+
+    transition({R_O}, {Load}, M) {
         loadHit;
         setUnreleased;
         popMandatoryQueue;

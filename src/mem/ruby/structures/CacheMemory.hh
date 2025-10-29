@@ -124,6 +124,7 @@ class CacheMemory : public SimObject
     // looks an address up in the cache
     AbstractCacheEntry* lookup(Addr address);
     const AbstractCacheEntry* lookup(Addr address) const;
+    int lookupCode(Addr address);
 
     Cycles getTagLatency() const { return tagArray.getLatency(); }
     Cycles getDataLatency() const { return dataArray.getLatency(); }

@@ -98,20 +98,23 @@ system.clk_domain.voltage_domain = VoltageDomain()
 
 # Set up the system
 system.mem_mode = "timing"  # Use timing accesses
-system.mem_ranges = [AddrRange("1GB")]  # Create an address range
+system.mem_ranges = [AddrRange("16GB")]  # Create an address range
 system.mem_ctrl = SimpleMemory(latency="100ns")  # 100 cycles under 2Ghz
 system.mem_ctrl.range = system.mem_ranges[0]
+
+traceFile = f"lock-traces/{args.ncore}_core_trace.txt"
 
 # Create a pair of simple CPUs
 if not args.ruby_test:
     system.cpu = [RiscvTimingSimpleCPU() for i in range(args.ncore)]
 else:
-    system.tester = WCLRubyTester(
-        checks_to_complete=args.nreq,
-        wakeup_frequency=args.wakeup_frequency,
-        num_cpus=args.ncore,
-        deadlock_threshold=50000,
-    )
+    system.cpu = [TraceTester(id = i, traceFile = traceFile) for i in range (args.ncore)]
+    #system.tester = WCLRubyTester(
+    #    checks_to_complete=args.nreq,
+    #    wakeup_frequency=args.wakeup_frequency,
+    #    num_cpus=args.ncore,
+    #    deadlock_threshold=50000,
+    #)
 
 # create the interrupt controller for the CPU and connect to the membus
 if not args.ruby_test:
@@ -124,7 +127,7 @@ system_type = "tester" if args.ruby_test else "cpu"
 system.caches = MyCacheSystem()
 system.caches.setup(
     system,
-    system.cpu if not args.ruby_test else system.tester,
+    system.cpu, #if not args.ruby_test else system.tester,
     [system.mem_ctrl],
     l1size=args.l1_size,
     l1_assoc=args.l1_assoc,
@@ -178,6 +181,8 @@ if not args.ruby_test:
 
     # set up the root SimObject and start the simulation
 root = Root(full_system=False, system=system)
+
+m5.ticks.setGlobalFrequency('1ns')
 # instantiate all of the objects we've created above
 m5.instantiate()
 

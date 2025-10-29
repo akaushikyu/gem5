@@ -926,6 +926,13 @@ machine(MachineType:L0Cache, "LC_MSI cache")
       popMandatoryQueue;
     }
 
+    transition(L, EnqueueLL, EQP_O) {
+      ll_unsetLoadLinkedLockTimer;
+      ll_scheduleLoadLinkedLockTimeout;
+      loadHit;
+      popMandatoryQueue;
+    }
+
     // [ANIRUDH] Can this happen....?
     // [TODO]
     transition(EQ_OI, EnqueueLL, EQP_O) {

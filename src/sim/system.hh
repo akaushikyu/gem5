@@ -570,7 +570,7 @@ class System : public SimObject, public PCEventScope
 
     bool isAddrRegistered(uint64_t addr) {
       for (unsigned i = 0; i < symbolAddrList.size(); i++) {
-        if (symbolAddrList[i].second == addr)
+        if ((symbolAddrList[i].second & ~0x3F) == (addr & ~0x3F))
           return true;
       }
       return false;

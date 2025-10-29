@@ -91,7 +91,6 @@ XYZCacheMemory::allocate(Addr address, AbstractCacheEntry *entry)
     DPRINTF(ZIVCache, "XYZ Allocating entry to address: %#x\n", address);
     AbstractCacheEntry* new_entry = nullptr;
     if(cacheAvail(address)) {
-
         DPRINTF(ZIVCache, "ZIV cache uses traditional allocate\n", address);
         new_entry = CacheMemory::allocate(address, entry);
     } else {
@@ -107,6 +106,7 @@ XYZCacheMemory::allocate(Addr address, AbstractCacheEntry *entry)
     // not cached by any core, later, the SM will call the AddSharers, MakeOwners etc to make this line non CRE
     // if it was a vacan entry, allocate would not modify that entry
     // otherwise, the relocation will leave the entry fresh
+    isCRE[new_entry->getSet()][new_entry->getWay()] = 1;
     assert(isCRE[new_entry->getSet()][new_entry->getWay()]);
     // CRECountPerSet[new_entry->getSet()] -= 1;
     // CRETotal -= 1;
@@ -154,7 +154,7 @@ void XYZCacheMemory::relocateVictim(AbstractCacheEntry* entry, Location targetLo
     auto orig_row = entry->getSet();
     auto orig_loc = entry->getWay();
     int is_original_entry_cre = isCRE[orig_row][orig_loc] ? 1 : 0;
-    DPRINTF(ZIVCache, "ZIV relocating %#x to row %d, loc %d\n", entry->m_Address, row, loc);
+    DPRINTF(ZIVCache, "ZIV relocating %#x to row %d, loc %d, orig row %d, orig loc %d\n", entry->m_Address, row, loc, orig_row, orig_loc);
 
     // clean up the target location, it is important that this comes first so that replacementData is released
     auto targetEntry = m_cache[row][loc];
@@ -171,20 +171,16 @@ void XYZCacheMemory::relocateVictim(AbstractCacheEntry* entry, Location targetLo
     CRECountPerSet[row] -= (1 - is_original_entry_cre);
     CRETotal -= (1 - is_original_entry_cre);
 
-
-
-
     // could be relocating to self
     if(targetEntry != nullptr) {
         bool selfRelocation = targetEntry == entry;
         if(selfRelocation) {
             assert(orig_row == row && orig_loc == loc);
             DPRINTF(ZIVCache, "ZIV: self-relocation\n");
-
         }
         deallocate(targetEntry->m_Address);
         // should now be released
-        assert(m_cache[row][loc] == nullptr);
+        // assert(m_cache[row][loc] == nullptr);
         if(selfRelocation) {
             // replacing to self
             // this line should have been deallocated

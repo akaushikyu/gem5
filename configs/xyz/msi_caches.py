@@ -87,10 +87,11 @@ class MyCacheSystem(RubySystem):
         # Ruby's global network.
         self.network = MyNetwork(self)
         num_agents = None
-        if type_of_system == "tester":
-            num_agents = cpus_or_testers.num_cpus
-        elif type_of_system == "cpu":
-            num_agents = len(cpus_or_testers)
+        num_agents = len(cpus_or_testers)
+        #if type_of_system == "tester":
+        #    num_agents = cpus_or_testers.num_cpus
+        #elif type_of_system == "cpu":
+        #    num_agents = len(cpus_or_testers)
 
         # MSI uses 3 virtual networks. One for requests (lowest priority), one
         # for responses (highest priority), and one for "forwards" or
@@ -205,21 +206,23 @@ class MyCacheSystem(RubySystem):
                 self.sequencers[i].connectCpuPorts(cpu)
         elif type_of_system == "tester":
             tester = cpus_or_testers
-            for seq in self.sequencers:
-                if seq.support_data_reqs and seq.support_inst_reqs:
-                    tester.cpuInstDataPort = seq.in_ports
-                elif seq.support_data_reqs:
-                    tester.cpuDataPort = seq.in_ports
-                elif seq.support_inst_reqs:
-                    tester.cpuInstDataPort = seq.in_ports
-
+            for i in range(0, num_agents):
+                tester[i].port = self.sequencers[i].in_ports
+                self.sequencers[i].no_retry_on_stall = True
+                self.sequencers[i].using_ruby_tester = False
+            #for seq in self.sequencers:
+            #    if seq.support_data_reqs and seq.support_inst_reqs:
+            #        tester.cpuInstDataPort = seq.in_ports
+            #    elif seq.support_data_reqs:
+            #        tester.cpuDataPort = seq.in_ports
+            #    elif seq.support_inst_reqs:
+            #        tester.cpuInstDataPort = seq.in_ports
                 # Do not automatically retry stalled Ruby requests
-                seq.no_retry_on_stall = True
+                #seq.no_retry_on_stall = True
 
                 # Tell each sequencer this is the ruby tester so that it
                 # copies the subblock back to the checker
-                seq.using_ruby_tester = True
-
+                #seq.using_ruby_tester = True
 
 class L0Cache(LC_MSI_L0Cache_Controller):
     _version = 0

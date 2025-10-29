@@ -1027,6 +1027,16 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popMandatoryQueue;
     }
 
+    transition({L}, Store, L) {
+        storeHit;
+        popMandatoryQueue;
+    }
+
+    transition({L}, Load, L) {
+        loadHit;
+        popMandatoryQueue;
+    }
+
     transition({M, E}, Lock, L) {
         allocateTBE;
         initiateGetMLocked;

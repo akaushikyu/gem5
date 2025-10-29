@@ -44,9 +44,13 @@ Ruby.create_system(args, False, system, dma_ports = [])
 # Create a top-level voltage domain and clock domain
 system.voltage_domain = VoltageDomain(voltage = args.sys_voltage)
 system.clk_domain = SrcClockDomain(clock = "2GHz",
+# For synthetic trace
+#system.clk_domain = SrcClockDomain(clock = "1GHz",
                                    voltage_domain = system.voltage_domain)
 # Create a seperate clock domain for Ruby
 system.ruby.clk_domain = SrcClockDomain(clock = "4GHz",
+# For synthetic trace
+#system.ruby.clk_domain = SrcClockDomain(clock = "1GHz",
                                         voltage_domain = system.voltage_domain)
 
 system.ruby.randomization = False
@@ -71,6 +75,9 @@ root.system.mem_mode = 'timing'
 
 # Not much point in this being higher than the L1 latency
 m5.ticks.setGlobalFrequency('0.25ns')
+
+# For synthetic trace
+#m5.ticks.setGlobalFrequency('1ns')
 
 # instantiate configuration
 m5.instantiate()

@@ -59,7 +59,7 @@ TraceTester::completeRequest(PacketPtr pkt) {
         }
     } else {
         // Reserve some time for other cores to complete the trace test
-        exitSimLoop("Reached trace end", 0, cyclesToTicks(curCycle() + Cycles(1000000)));
+        exitSimLoop("Reached trace end", 0, cyclesToTicks(curCycle() + Cycles(8000000000)));
     }
 }
 
