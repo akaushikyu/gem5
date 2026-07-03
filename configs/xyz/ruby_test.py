@@ -71,7 +71,7 @@ system.tester = RubyTester(
 )
 
 # Create a simple memory controller and connect it to the membus
-system.mem_ctrl = SimpleMemory(latency="50ns", bandwidth="0GB/s")
+system.mem_ctrl = SimpleMemory(latency="100ns", bandwidth="0GB/s")
 system.mem_ctrl.range = system.mem_ranges[0]
 
 l2assoc = 2
@@ -101,6 +101,4 @@ m5.instantiate()
 
 print("Beginning simulation!")
 exit_event = m5.simulate()
-print(
-    f"Exiting @ tick {m5.curTick()} because {exit_event.getCause()}"
-)
+print(f"Exiting @ tick {m5.curTick()} because {exit_event.getCause()}")

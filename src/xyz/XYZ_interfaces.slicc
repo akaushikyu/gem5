@@ -23,6 +23,8 @@ structure (XYZCacheMemory, external = "yes") {
   AbstractCacheEntry getNullEntry();
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry, bool);
+  AbstractCacheEntry allocateLineBuffer(Addr, AbstractCacheEntry);
+  AbstractCacheEntry getLineBuffer();
   void allocateVoid(Addr, AbstractCacheEntry);
   void deallocate(Addr);
   AbstractCacheEntry lookup(Addr);

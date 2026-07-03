@@ -1,0 +1,6 @@
+protocol "LC_MSI_ql" use_secondary_load_linked, use_secondary_store_conditional;
+include "XYZ_interfaces.slicc";
+include "LC_MSI_ql-msg.sm";
+include "LC_MSI_ql-cache0.sm";
+include "LC_MSI_ql-cache.sm";
+include "LC_MSI_ql-dir.sm";

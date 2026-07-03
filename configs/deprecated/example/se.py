@@ -139,7 +139,11 @@ if "--ruby" in sys.argv:
 
 args = parser.parse_args()
 
-if buildEnv["PROTOCOL"] == "EXCL" or buildEnv["PROTOCOL"] == "INCL":
+if (
+    buildEnv["PROTOCOL"] == "EXCL"
+    or buildEnv["PROTOCOL"] == "INCL"
+    or buildEnv["PROTOCOL"] == "EXCL_ql"
+):
     # override clock frequence settings
     args.cpu_clock = "2GHz"
     args.ruby_clock = "4GHz"

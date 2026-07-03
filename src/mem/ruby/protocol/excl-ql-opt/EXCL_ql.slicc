@@ -1,0 +1,5 @@
+protocol "EXCL_ql" use_secondary_load_linked, use_secondary_store_conditional;
+include "EXCL_ql-msg.sm";
+include "EXCL_ql-L1cache.sm";
+include "EXCL_ql-L2cache.sm";
+include "EXCL_ql-Directory.sm";

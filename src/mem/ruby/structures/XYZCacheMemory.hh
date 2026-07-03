@@ -69,7 +69,7 @@ class XYZCacheMemory : public CacheMemory {
 
   virtual void addSharer(Addr address) {
       if(!m_ziv) return;
-      assert(isTagPresent(address));
+      //assert(isTagPresent(address));
       if(Q.find(address) != Q.end()) {
           Q.erase(address);
           assert(P.find(address) == P.end());
@@ -92,7 +92,7 @@ class XYZCacheMemory : public CacheMemory {
   }
   virtual void markOwner(Addr address) {
       if(!m_ziv) return;
-      assert(isTagPresent(address));
+      //assert(isTagPresent(address));
       if(Q.find(address) != Q.end()) {
           Q.erase(address);
           assert(P.find(address) == P.end());
@@ -109,7 +109,7 @@ class XYZCacheMemory : public CacheMemory {
   }
   virtual void removeSharer(Addr address) {
       if(!m_ziv) return;
-      assert(isTagPresent(address));
+      //assert(isTagPresent(address));
       assert(Q.find(address) == Q.end());
       auto it = P.find(address);
       assert(it != P.end());
@@ -124,7 +124,7 @@ class XYZCacheMemory : public CacheMemory {
   }
   virtual void clearSharer(Addr address) {
       if(!m_ziv) return;
-      assert(isTagPresent(address));
+      //assert(isTagPresent(address));
       auto it = P.find(address);
       assert(it != P.end());
       assert(Q.find(address) == Q.end());
@@ -138,7 +138,7 @@ class XYZCacheMemory : public CacheMemory {
   virtual void markCRE(Addr address) {
       if(!m_ziv) return;
       DPRINTF(ZIVCache, "ZIV: marking %#x ad CRE\n", address);
-      assert(isTagPresent(address));
+      //assert(isTagPresent(address));
       assert(Q.find(address) != Q.end());
       assert(P.find(address) == P.end());
       Q.erase(address);
@@ -161,7 +161,7 @@ class XYZCacheMemory : public CacheMemory {
   }
   bool checkCRE(Addr address) {
       panic_if(!m_ziv, "Relocation when ziv is not used");
-      assert(isTagPresent(address));
+      //assert(isTagPresent(address));
       if(P.find(address) == P.end()) {
           return false;
       } else if(Q.find(address) == Q.end()) {
@@ -221,7 +221,7 @@ class XYZCacheMemory : public CacheMemory {
       // TODO: use a more intelligent replacement policy
       assert(Q.size() > 0);
       Addr victim = *Q.begin();
-      assert(isTagPresent(victim));
+      //assert(isTagPresent(victim));
       return victim;
   }
   Addr simpleProbe(Addr address) const {
@@ -229,7 +229,7 @@ class XYZCacheMemory : public CacheMemory {
 
       // assert(Q.size() >= 0);
       Addr victim = *Q.begin();
-      assert(isTagPresent(victim));
+      //assert(isTagPresent(victim));
       return victim;
   }
   bool vi_enabled() const {

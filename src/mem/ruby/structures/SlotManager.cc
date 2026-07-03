@@ -90,18 +90,18 @@ SlotManager::scheduleNextSlotBoundary(int core) {
             auto curCycle = m_clock.curCycle();
             auto nextSlotCycle = vanillaNextSlotBoundary(curCycle, core);
             panic_if(nextSlotCycle <= curCycle, "next slot cycle %d is not greater than current cycle %d\n", nextSlotCycle, curCycle);
-            DPRINTF(ZCLLC_TDM, "Scheduling next slot boundary at %d\n", nextSlotCycle);
+            DPRINTF(ZCLLC_TDM, "[VANILLA] Scheduling next slot boundary at %d\n", nextSlotCycle);
             m_consumer.scheduleEvent(Cycles(nextSlotCycle - curCycle));
         } else if(this->isWorkConserving() && !this->isSubslotOpt()) {
             auto curCycle = m_clock.curCycle();
             auto div = curCycle / this->m_full_slot_width;
             auto nextSlotCycle = Cycles((div + 1) * this->m_full_slot_width);
             panic_if(nextSlotCycle <= curCycle, "next slot cycle %d is not greater than current cycle %d\n", nextSlotCycle, curCycle);
-            DPRINTF(ZCLLC_TDM, "Scheduling next slot boundary at %d\n", nextSlotCycle);
+            DPRINTF(ZCLLC_TDM, "[WC] Scheduling next slot boundary at %d\n", nextSlotCycle);
             m_consumer.scheduleEvent(Cycles(nextSlotCycle - curCycle));
         } else if(this->isSubslotOpt()) {
             m_consumer.scheduleEvent(Cycles(1));
-            DPRINTF(ZCLLC_TDM, "Scheduling next slot boundary at next cycle\n");
+            DPRINTF(ZCLLC_TDM, "[SUBSLOT] Scheduling next slot boundary at next cycle\n");
         }
 }
 bool SlotManager::probeLLCResponse(int core, int slot_idx,

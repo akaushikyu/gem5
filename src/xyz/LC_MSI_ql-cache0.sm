@@ -1,0 +1,1147 @@
+
+machine(MachineType:L0Cache, "LC_MSI cache")
+  : Sequencer* sequencer;
+    CacheMemory *ICache;
+    CacheMemory *DCache;
+    bool send_evictions;
+    XYZStatsObject *xyzStatsObject;
+    Cycles llsc_lock_timeout_latency := 100;
+
+    MessageBuffer * requestToL1, network="To", virtual_network="4", vnet_type="prv_req";
+    MessageBuffer * forwardFromL1, network="From", virtual_network="4", vnet_type="prv_req";
+    MessageBuffer * responseFromL1, network="From", virtual_network="5", vnet_type="prv_resp";
+    MessageBuffer * responseToL1, network="To", virtual_network="5", vnet_type="prv_resp";
+
+    MessageBuffer * mandatoryQueue;
+
+    //CustomProfiler *profiler;
+{
+  state_declaration(State, desc="Cache states") {
+    I,      AccessPermission:Invalid, desc="Not present/Invalid";
+
+    // States moving out of I
+    IS_D,   AccessPermission:Busy,
+                desc="Invalid, moving to S, waiting for data";
+    IM_D,   AccessPermission:Busy,
+                desc="Invalid, moving to M, waiting for acks";
+    IML_D,   AccessPermission:Busy,
+                desc="Invalid, moving to M, waiting for acks";
+
+    S,      AccessPermission:Read_Only,
+                desc="Shared. Read-only, other caches may have the block";
+
+    M,      AccessPermission:Read_Write,
+                desc="Modified. Read & write permissions. Owner of block";
+
+    L,      AccessPermission:Read_Write,
+                desc="Modified. Read & write permissions. Lock Owner of block";
+
+    // Queue lock special states
+    // [ANI] We may need to define an initialize modified state
+    // this will insulate the initialize modified state from replacement
+    IE_AD, AccessPermission:Invalid, desc="Transient state, from I -> EQ";
+    IE_D, AccessPermission:Invalid, desc="Transient state after seeing own enqueue I -> EQ";
+    IEO_D, AccessPermission:Invalid, desc="Transient state after seeing own enqueue I -> EQ_O";
+    OE_A, AccessPermission:Read_Only, desc="Transient state from O -> EQ";
+    SE_A, AccessPermission:Read_Only, desc="Transient state from O/S -> EQ";
+    EQ, AccessPermission:Read_Write, desc="Enqueue state, multiple cores can be in this state";
+    EQ_O, AccessPermission:Read_Write, desc="Enqueue owned state, only one core can be in this state";
+    EQ_OI, AccessPermission:Read_Write, desc="Enqueue owned state, only one core can be in this state, after seeing another enqueue, move to I";
+    A, AccessPermission:Read_Only, desc="Acquire state, only one core can be in this state";
+    TA, AccessPermission:Read_Only, desc="Try-Acquire state, only one core can be in this state";
+    A_O, AccessPermission:Read_Only, desc="Acquire owned state, only one core can be in this state";
+    R_AD, AccessPermission:Read_Only, desc="Release state, waiting for release on bus";
+    R_D, AccessPermission:Read_Only, desc="Release state, waiting for updated lock data from thread in EQ_O state";
+    R, AccessPermission:Read_Only, desc="Release state";
+    R_O, AccessPermission:Read_Only, desc="Release exclusive state";
+    EQP, AccessPermission:Busy, desc="Enqueue in progress";
+    EQP_O, AccessPermission:Busy, desc="Enqueue in progress";
+  }
+
+  enumeration(Event, desc="Cache events") {
+    // From the processor/sequencer/mandatory queue
+    Load,           desc="Load from processor";
+    Ifetch,           desc="Load from processor";
+    Store,          desc="Store from processor";
+    Stall,          desc="Stall...";
+    Lock,           desc="Lock";
+    Unlock,         desc="unlock";
+
+    // Internal event (only triggered from processor requests)
+    Replacement,    desc="Triggered when block is chosen as victim";
+
+    // Forwarded request from other cache via dir on the forward network
+    Inv,            desc="Invalidate from the directory.";
+    PutAck,         desc="Response from directory after we issue a put. This must be on the fwd network to avoid deadlock.";
+
+    // Responses from directory
+    Data,  desc="Data from directory (acks = 0)";
+    ExData,  desc="Data from directory (acks = 0)";
+
+    LLSC_Timeout,             desc="LL/SC lock timeout";
+    Failed_SC,                desc="Store conditional request failed";
+
+    // Queue lock events generated in mandatory queue
+    EnqueueLL, desc="";                        // enqueue store operations
+    EnqueueSC, desc="";
+    EnqueueSCI, desc="";                        // enqueue lock operations
+    EnqueueI, desc="";                          // enqueue initialization operation
+    EnqueueW, desc="";                        // enqueue lock operations
+    Acquire, desc="";                          // acquire lock operations
+    TryAcquire, desc="";                       // try acquire lock operations
+    Release, desc="";                          // release lock operations
+    Transfer, desc="";                         // release lock operations
+
+    // Triggering events
+    OwnEnqueue, desc="";                       // own enqueue lock operation
+    OtherEnqueue, desc="";                     // other enqueue lock operation
+    OwnAcquire, desc="";                       // own acquire; there is no otherAcquire
+    OwnRelease, desc="";                       // own release
+    OtherRelease, desc="";                     // other release
+  }
+
+  structure(Entry, desc="Cache entry", interface="AbstractCacheEntry") {
+    State CacheState,        desc="cache state";
+    DataBlock DataBlk,       desc="Data in the block";
+
+    bool isEnqueued,         desc="enqueued";
+    bool isReleased,         desc="released";
+  }
+
+  structure(TBE, desc="Entry for transient requests") {
+    State TBEState,         desc="State of block";
+    DataBlock DataBlk,      desc="Data for the block. Needed for MI_A";
+    int AcksOutstanding, default=0, desc="Number of acks left to receive.";
+    Cycles cycle, desc="Cycle";
+  }
+  structure(TBETable, external="yes") {
+    TBE lookup(Addr);
+    void allocate(Addr);
+    void deallocate(Addr);
+    bool isPresent(Addr);
+    int cnt();
+  }
+  TBETable TBEs, template="<L0Cache_TBE>", constructor="m_number_of_TBEs";
+  TimerTable llscLockTimerTable;
+  Tick clockEdge();
+  Cycles curCycle();
+
+  void set_cache_entry(AbstractCacheEntry a);
+  void unset_cache_entry();
+  void set_tbe(TBE b);
+  void unset_tbe();
+  Tick cyclesToTicks(Cycles c);
+  Cycles ticksToCycles(Tick t);
+  void wakeUpBuffers(Addr a);
+  void wakeUpAllBuffers();
+  void heheheheh();
+  DataBlock coalesceData(DataBlock a, DataBlock b, Addr waddr, int size);
+
+  // void hehehe();
+  MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+
+  // Convenience function to look up the cache entry.
+  // Needs a pointer so it will be a reference and can be updated in actions
+  Entry getICacheEntry(Addr address), return_by_pointer="yes" {
+    Entry icache := static_cast(Entry, "pointer", ICache.lookup(address));
+    return icache;
+  }
+  Entry getDCacheEntry(Addr address), return_by_pointer="yes" {
+    Entry dcache := static_cast(Entry, "pointer", DCache.lookup(address));
+    return dcache;
+  }
+  Entry getCacheEntry(Addr address), return_by_pointer="yes" {
+    Entry icache := static_cast(Entry, "pointer",ICache.lookup(address));
+    Entry dcache := static_cast(Entry, "pointer",DCache.lookup(address));
+    if(is_valid(icache)) {
+        assert(is_invalid(dcache));
+        return icache;
+    } else {
+        return dcache;
+    }
+  }
+
+  Entry allocateDLineBuffer(Addr address), return_by_pointer="yes" {
+    Entry cache_entry := static_cast(Entry, "pointer", DCache.allocateLineBuffer(address, new Entry));
+    return cache_entry;
+  }
+
+  Event mandatory_request_type_to_event(RubyRequestType type, Addr addr) {
+    if (type == RubyRequestType:LD) {
+      return Event:Load;
+    } else if (type == RubyRequestType:IFETCH) {
+      return Event:Ifetch;
+    } else if ((type == RubyRequestType:ST) ||
+               (type == RubyRequestType:ATOMIC)) {
+      return Event:Store;
+    } else if (type == RubyRequestType:Load_Linked) {
+      return Event:Lock;
+    } else if (type == RubyRequestType:Store_Conditional) {
+      if (!sequencer.llscCheckMonitor(addr)) {
+        return Event:Failed_SC;
+      } else {
+        return Event:Unlock;
+      }
+    } else if (type == RubyRequestType:ENQUEUELL) {
+      DPRINTF(RubySlicc, "Trigger lock enqueue load event\n");
+      return Event:EnqueueLL;
+    } else if (type == RubyRequestType:ENQUEUESCI ||
+               type == RubyRequestType:ENQUEUESC) {
+        if (!sequencer.llscCheckMonitor(addr)) {
+          return Event:Failed_SC;
+        } else {
+          if (type == RubyRequestType:ENQUEUESCI) {
+            return Event:EnqueueSCI;
+          } else {
+            return Event:EnqueueSC;
+          }
+        }
+    } else if (type == RubyRequestType:ENQUEUEI) {
+        return Event:EnqueueI;
+    } else if (type == RubyRequestType:ENQUEUEW) {
+        return Event:EnqueueW;
+    } else if (type == RubyRequestType:TRYACQUIRE) {
+        return Event:TryAcquire;
+    } else if (type == RubyRequestType:ACQUIRE) {
+        return Event:Acquire;
+    } else if (type == RubyRequestType:RELEASE) {
+        return Event:Release;
+    } else if (type == RubyRequestType:TRANSFER) {
+        return Event:Transfer;
+    } else {
+      error("Invalid RubyRequestType");
+    }
+  }
+
+
+  // getState/setState/getAccessPermission/setAccessPermission/functionRead/Write almost never changes
+  State getState(TBE tbe, Entry cache_entry, Addr addr) {
+    // The TBE state will override the state in cache memory, if valid
+    if (is_valid(tbe)) { return tbe.TBEState; }
+    // Next, if the cache entry is valid, it holds the state
+    else if (is_valid(cache_entry)) { return cache_entry.CacheState; }
+    // If the block isn't present, then it's state must be I.
+    else { return State:I; }
+  }
+
+  void setState(TBE tbe, Entry cache_entry, Addr addr, State state) {
+    if (is_valid(tbe)) { tbe.TBEState := state; }
+    if (is_valid(cache_entry)) { cache_entry.CacheState := state; }
+  }
+
+  AccessPermission getAccessPermission(Addr addr) {
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+        return L0Cache_State_to_permission(tbe.TBEState);
+    }
+
+    Entry cache_entry := getCacheEntry(addr);
+    if(is_valid(cache_entry)) {
+        return L0Cache_State_to_permission(cache_entry.CacheState);
+    }
+
+    return AccessPermission:NotPresent;
+  }
+
+  void setAccessPermission(Entry cache_entry, Addr addr, State state) {
+      if (is_valid(cache_entry)) {
+          cache_entry.changePermission(L0Cache_State_to_permission(state));
+      }
+  }
+
+  void functionalRead(Addr addr, Packet *pkt) {
+      TBE tbe := TBEs[addr];
+      if(is_valid(tbe)) {
+          testAndRead(addr, tbe.DataBlk, pkt);
+      } else {
+          testAndRead(addr, getCacheEntry(addr).DataBlk, pkt);
+      }
+  }
+
+  int functionalWrite(Addr addr, Packet *pkt) {
+      int num_functional_writes := 0;
+
+      TBE tbe := TBEs[addr];
+      if(is_valid(tbe)) {
+          num_functional_writes := num_functional_writes +
+              testAndWrite(addr, tbe.DataBlk, pkt);
+          return num_functional_writes;
+      }
+
+      num_functional_writes := num_functional_writes +
+              testAndWrite(addr, getCacheEntry(addr).DataBlk, pkt);
+      return num_functional_writes;
+  }
+  out_port(request_out, RequestMsg, requestToL1);
+  out_port(response_out, ResponseMsg, responseToL1);
+
+  // Use Timer
+  in_port(llscLockTimerTable_in, Addr, llscLockTimerTable, rank = 4) {
+    if (llscLockTimerTable_in.isReady(clockEdge())) {
+      Addr readyAddress := llscLockTimerTable.nextAddress();
+      trigger(Event:LLSC_Timeout, readyAddress, getCacheEntry(readyAddress),
+                TBEs.lookup(readyAddress));
+    }
+  }
+
+  // in_port
+  in_port(response_in, ResponseMsg, responseFromL1) {
+      if (response_in.isReady(clockEdge())) {
+          peek(response_in, ResponseMsg) { // in_msg is implied
+                Entry cache_entry := getCacheEntry(in_msg.addr);
+                TBE tbe := TBEs[in_msg.addr];
+                // [ANIRUDH] Removing below assert as we may get a broadcast
+                // data when remote core is pushing data
+                //assert(is_valid(tbe));
+
+                if (in_msg.Type == CoherenceResponseType:Data) {
+                    trigger(Event:Data, in_msg.addr, cache_entry,
+                            tbe);
+                } else if(in_msg.Type == CoherenceResponseType:ExData) {
+                    trigger(Event:ExData, in_msg.addr, cache_entry,
+                            tbe);
+                } else {
+                    error("Unexpected response from other cache");
+                }
+          }
+      }
+  }
+
+  in_port(forward_in, RequestMsg, forwardFromL1) {
+    if(forward_in.isReady(clockEdge())) {
+      peek(forward_in, RequestMsg, block_on="addr") {
+        Entry cache_entry := getCacheEntry(in_msg.addr);
+        TBE tbe := TBEs[in_msg.addr];
+
+        if (in_msg.Type == CoherenceRequestType:Inv) {
+            trigger(Event:Inv, in_msg.addr, cache_entry, tbe);
+        } else {
+            error("Unexpected forward message!");
+        }
+      }
+    }
+  }
+
+  in_port(mandatory_in, RubyRequest, mandatoryQueue) {
+    if(mandatory_in.isReady(clockEdge())) {
+      peek(mandatory_in, RubyRequest) {
+        // Should not trigger here
+        TBE tbe := TBEs[in_msg.LineAddress];
+        Entry cache_entry := getCacheEntry(in_msg.LineAddress);
+        if(TBEs.cnt() > 0) {
+            // only 1 outstanding request
+            // TODO: relax this constraint
+            trigger(Event:Stall, in_msg.LineAddress, cache_entry,
+                    tbe);
+        }
+        Entry Icache_entry := getICacheEntry(in_msg.LineAddress);
+        Entry Dcache_entry := getDCacheEntry(in_msg.LineAddress);
+        if(in_msg.Type == RubyRequestType:IFETCH) {
+            // INSTR access
+            if(is_valid(Icache_entry)) {
+                // hit
+                trigger(Event:Ifetch, in_msg.LineAddress, Icache_entry, tbe);
+            } else {
+                if(is_valid(Dcache_entry)) { // wrong
+                    trigger(Event:Replacement, in_msg.LineAddress, Dcache_entry, tbe);
+                }
+                if(ICache.cacheAvail(in_msg.LineAddress)) {
+                    // or miss
+                    trigger(Event:Ifetch, in_msg.LineAddress, Icache_entry, tbe);
+                } else {
+                    Addr addr := ICache.cacheProbe(in_msg.LineAddress);
+                    check_on_cache_probe(mandatory_in, addr);
+                    trigger(Event:Replacement, addr, getICacheEntry(addr), TBEs[addr]);
+                }
+            }
+        } else {
+            if (in_msg.Type == RubyRequestType:ENQUEUEW ||
+                in_msg.Type == RubyRequestType:TRANSFER) {
+                if (is_invalid(Dcache_entry)) {
+                  // [ANIRUDH] Check if cache line is invalid
+                  // [TODO]
+                  DPRINTF(RubySlicc,"ALLOCATING DLINE BUFFER L0\n");
+                  Dcache_entry := allocateDLineBuffer(in_msg.LineAddress);
+                  Dcache_entry.CacheState := State:I;
+                  trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                    in_msg.LineAddress, Dcache_entry, tbe);
+                } else {
+                  trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                    in_msg.LineAddress, Dcache_entry, tbe);
+                }
+            } else {
+              // Data access
+              if(is_valid(Dcache_entry)) {
+                trigger(
+                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                        in_msg.LineAddress, Dcache_entry, tbe);
+              } else if(is_valid(Icache_entry)) {
+                trigger(Event:Replacement, in_msg.LineAddress, Icache_entry, tbe);
+              }  else if(DCache.cacheAvail(in_msg.LineAddress)) {
+                trigger(
+                    mandatory_request_type_to_event(in_msg.Type, in_msg.LineAddress),
+                        in_msg.LineAddress, Dcache_entry, tbe);
+              } else {
+                // victim
+                Addr addr := DCache.cacheProbe(in_msg.LineAddress);
+                check_on_cache_probe(mandatory_in, addr);
+                trigger(Event:Replacement, addr, getDCacheEntry(addr), TBEs[addr]);
+              }
+            }
+          }
+        }
+      }
+    }
+
+  // Actions for LL/SC lock transitions
+  action(ll_scheduleLoadLinkedLockTimeout, "ll", desc="Schedule LL/SC lock timeout.") {
+    DPRINTF(RubySlicc, "ACTION: ll_scheduleLoadLinkedLockTimeout on %x\n", address);
+    llscLockTimerTable.set(address, clockEdge() + cyclesToTicks(llsc_lock_timeout_latency));
+  }
+
+  action(ll_unsetLoadLinkedLockTimer, "\ll", desc="Unset LL/SC lock timer.") {
+    DPRINTF(RubySlicc, "ACTION: ll_unsetLoadLinkedLockTimer on %x\n", address);
+    llscLockTimerTable.unset(address);
+  }
+
+  action(sendGetS, 'gS', desc="Send GetS to the directory") {
+    enqueue(request_out, RequestMsg, 1) {
+      // address, cache_entry, tbe
+      out_msg.addr := address;
+      out_msg.Type := CoherenceRequestType:GetS;
+      // out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
+      out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+      out_msg.MessageSize := MessageSizeType:Control;
+      out_msg.Requestor := machineID;
+      out_msg.is_reordered := false;
+    }
+  }
+  action(sendGetM, "gM", desc="Send GetM to the directory") {
+    enqueue(request_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:GetM;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.MessageSize := MessageSizeType:Control;
+        out_msg.Requestor := machineID;
+        out_msg.is_reordered := false;
+    }
+  }
+
+  action(sendPushData, "seql", desc="Send push data to the directory") {
+    peek(mandatory_in, RubyRequest) {
+      enqueue(request_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:PushData;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.MessageSize := MessageSizeType:Control;
+        out_msg.Requestor := machineID;
+        out_msg.is_reordered := false;
+        out_msg.size := in_msg.Size;
+        out_msg.waddr := in_msg.PhysicalAddress;
+    }
+   }
+  }
+
+  action(sendPutS, "pS", desc="Send PutS to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(request_out, RequestMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceRequestType:PutS;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.MessageSize := MessageSizeType:Control;
+        out_msg.Requestor := machineID;
+        out_msg.is_reordered := false;
+      }
+  }
+
+  action(setUnreleased, desc="") {
+    DPRINTF(RubySlicc, "ACTION: setUnReleased on %x\n", address);
+    assert(is_valid(cache_entry));
+    cache_entry.isReleased := false;
+  }
+
+  action(setReleased, desc="") {
+    DPRINTF(RubySlicc, "ACTION: setReleased on %x\n", address);
+    assert(is_valid(cache_entry));
+    cache_entry.isEnqueued := false;
+    cache_entry.isReleased := true;
+  }
+
+  action(sendPutM, "pM", desc="Send putM+data to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(request_out, RequestMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceRequestType:PutM;
+          out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+          out_msg.DataBlk := cache_entry.DataBlk;
+          out_msg.MessageSize := MessageSizeType:Data;
+          out_msg.Requestor := machineID;
+          out_msg.is_reordered := false;
+      }
+  }
+  action(sendWBData, "sWB", desc="Send putM+data to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(response_out, ResponseMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceResponseType:Data;
+          out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+          out_msg.DataBlk := cache_entry.DataBlk;
+          out_msg.MessageSize := MessageSizeType:Data;
+      }
+  }
+
+  action(sendPushDataD, "sPDD", desc="Send putM+data to the directory") {
+      assert(is_valid(cache_entry));
+      enqueue(response_out, ResponseMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceResponseType:PushData;
+          out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+          out_msg.DataBlk := cache_entry.DataBlk;
+          out_msg.MessageSize := MessageSizeType:Data;
+      }
+  }
+
+  action(sendCacheDataToReq, "cdR", desc="Send cache data to requestor") {
+    assert(is_valid(cache_entry));
+    // in_message & out_message
+    peek(forward_in, RequestMsg) {
+        enqueue(response_out, ResponseMsg, 1) {
+            out_msg.addr := address;
+            out_msg.Type := CoherenceResponseType:Data;
+            out_msg.Destination.add(in_msg.Requestor);
+            out_msg.DataBlk := cache_entry.DataBlk;
+            out_msg.MessageSize := MessageSizeType:Data;
+            out_msg.Sender := machineID;
+        }
+    }
+  }
+  action(sendCacheDataToDir, "cdD", desc="Send the cache data to the dir") {
+    enqueue(response_out, ResponseMsg, 1) {
+        out_msg.addr := address;
+        out_msg.Type := CoherenceResponseType:Data;
+        out_msg.Destination.add(createMachineID(MachineType:L1Cache, version));
+        out_msg.DataBlk := cache_entry.DataBlk;
+        out_msg.MessageSize := MessageSizeType:Data;
+        out_msg.Sender := machineID;
+    }
+  }
+
+  action(loadHit, "Lh", desc="Load hit") {
+    assert(is_valid(cache_entry));
+    if (DCache.isTagPresent(address)) {
+        DCache.setMRU(cache_entry);
+    } else {
+        ICache.setMRU(cache_entry);
+    }
+    DPRINTF(RubySlicc, "%#x: cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+    sequencer.readCallback(address, cache_entry.DataBlk, false);
+  }
+
+
+  action(externalLoadHit, "xLh", desc="External load hit (was a miss)") {
+    assert(is_valid(cache_entry));
+    peek(response_in, ResponseMsg) { // this is from the directory
+        if (DCache.isTagPresent(address)) {
+            DCache.setMRU(cache_entry);
+        } else {
+            ICache.setMRU(cache_entry);
+        }
+        // Forward the type of machine that responded to this request
+        // E.g., another cache or the directory. This is used for tracking
+        // statistics.
+        DPRINTF(RubySlicc, "%#x: cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+        sequencer.readCallback(address, cache_entry.DataBlk, true,
+                               machineIDToMachineType(in_msg.Sender));
+    }
+  }
+  action(storeHit, "Sh", desc="Store hit") {
+    assert(is_valid(cache_entry));
+    DCache.setMRU(cache_entry);
+    // The same as the read callback above.
+    DPRINTF(RubySlicc, "%#x: before cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+    sequencer.writeCallback(address, cache_entry.DataBlk, false);
+    DPRINTF(RubySlicc, "%#x: after cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+}
+
+  action(externalStoreHit, "xSh", desc="External store hit (was a miss)") {
+      assert(is_valid(cache_entry));
+      peek(response_in, ResponseMsg) {
+          DCache.setMRU(cache_entry);
+          DPRINTF(RubySlicc, "%#x: before cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+          sequencer.writeCallback(address, cache_entry.DataBlk, true,
+                                // Note: this could be the last ack.
+                                machineIDToMachineType(in_msg.Sender));
+          DPRINTF(RubySlicc, "%#x: after cache_entry.DataBlk: %s\n", address, cache_entry.DataBlk);
+      }
+  }
+
+  action(forwardEviction, "e", desc="sends eviction notification to CPU") {
+    if (send_evictions) {
+        sequencer.evictionCallback(address);
+    }
+  }
+  action(allocateICacheBlock, "ai", desc="Allocate a cache block") {
+    assert(is_invalid(cache_entry));
+    assert(ICache.cacheAvail(address));
+    set_cache_entry(ICache.allocate(address, new Entry));
+  }
+  action(allocateDCacheBlock, "ad", desc="Allocate a cache block") {
+    assert(is_invalid(cache_entry));
+    assert(DCache.cacheAvail(address));
+    set_cache_entry(DCache.allocate(address, new Entry));
+  }
+
+  action(deallocateCacheBlock, "d", desc="Deallocate a cache block") {
+    assert(is_valid(cache_entry));
+    // clear the cache_entry variable (now it's invalid)
+    if (DCache.isTagPresent(address)) {
+      DCache.deallocate(address);
+    } else {
+      ICache.deallocate(address);
+    }
+    unset_cache_entry();
+  }
+
+  action(writeDataToCache, "wd", desc="Write data to the cache") {
+    peek(response_in, ResponseMsg) {
+        assert(is_valid(cache_entry));
+        cache_entry.DataBlk := in_msg.DataBlk;
+    }
+  }
+  action(allocateTBE, "aT", desc="Allocate TBE") {
+    assert(is_invalid(tbe));
+    TBEs.allocate(address);
+    // this updates the tbe variable for other actions
+    set_tbe(TBEs[address]);
+    tbe.cycle := curCycle();
+  }
+
+  action(deallocateTBE, "dT", desc="Deallocate TBE") {
+      assert(is_valid(tbe));
+      TBEs.deallocate(address);
+      // this makes the tbe variable invalid
+      //profiler.profileE2ELatency(curCycle(), tbe.cycle);
+      unset_tbe();
+  }
+
+  action(copyDataFromCacheToTBE, "Dct", desc="Copy data from cache to TBE") {
+      assert(is_valid(cache_entry));
+      assert(is_valid(tbe));
+      tbe.DataBlk := cache_entry.DataBlk;
+  }
+
+  action(popMandatoryQueue, "pQ", desc="Pop the mandatory queue") {
+    mandatory_in.dequeue(clockEdge());
+  }
+
+  action(popResponseQueue, "pR", desc="Pop the response queue") {
+      response_in.dequeue(clockEdge());
+  }
+
+  action(hhc_store_fail, "\hc",
+        desc="Notify sequencer that store conditional failed") {
+    sequencer.writeCallbackScFail(address, cache_entry.DataBlk);
+  }
+
+  action(popForwardQueue, "pF", desc="Pop the forward queue") {
+      forward_in.dequeue(clockEdge());
+  }
+
+  action(stall, "z", desc="Stall the incoming request") {
+    peek(mandatory_in, RubyRequest) {
+        Addr a := in_msg.LineAddress;
+        // Addr a := in_msg.PhysicalAddress;
+        stall_and_wait(mandatory_in, a);
+    }
+  }
+  action(stall_fwd, "zfwd", desc="Stall forward") {
+    stall_and_wait(forward_in, address);
+  }
+
+  action(kd_wakeUpDependents, "kd", desc="Wake-up dependents") {
+    wakeUpAllBuffers();
+    // wakeUpAllBuffers(address);
+  }
+  action(tic, "dtic", desc="Start timing") {
+    if(TBEs.cnt() == 0) {
+        xyzStatsObject.tic();
+    }
+  }
+  action(toc, "dtoc", desc="Start timing") {
+    xyzStatsObject.toc();
+  }
+
+  action(bufferHit, desc="Buffer hit") {
+    DPRINTF(RubySlicc, "ACTION: bufferHit on %x\n", address);
+    DPRINTF(RubySlicc, "Before bufferHit data block %s\n", cache_entry.DataBlk);
+    assert(is_valid(cache_entry));
+    sequencer.writeCallback(address, cache_entry.DataBlk, false);
+    DPRINTF(RubySlicc, "After bufferHit data block %s\n", cache_entry.DataBlk);
+  }
+
+  action(coalesceDataResponseToCache, desc="Coalesce data response to the cache") {
+    // this does a coalesce of data on a byte granularity
+    peek(response_in, ResponseMsg) { // in_msg is implied
+      assert(is_valid(cache_entry));
+      DPRINTF(RubySlicc, "ACTION: coalesceDataResponseToCache on %x %x %d, data: %s\n", address, in_msg.waddr, in_msg.size, cache_entry.DataBlk);
+      cache_entry.DataBlk :=
+        coalesceData(cache_entry.DataBlk, in_msg.DataBlk, in_msg.waddr, in_msg.size);
+    }
+    DPRINTF(RubySlicc,
+        "Data blk after action: %s\n", cache_entry.DataBlk);
+   }
+
+ // ###############################################################
+
+  transition({I}, Lock, IML_D) {
+    tic;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetM;
+    popMandatoryQueue;
+  }
+
+  transition({S}, Lock, IML_D) {
+    tic;
+    deallocateCacheBlock;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetM;
+    popMandatoryQueue;
+  }
+
+  transition(I, Load, IS_D) {
+    tic;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetS;
+    popMandatoryQueue;
+  }
+
+  transition(I, Ifetch, IS_D) {
+    tic;
+    allocateICacheBlock;
+    allocateTBE;
+    sendGetS;
+    popMandatoryQueue;
+  }
+  transition(I, Store, IM_D) {
+    tic;
+    allocateDCacheBlock;
+    allocateTBE;
+    sendGetM;
+    popMandatoryQueue;
+  }
+
+  transition(IS_D, {Load, Store, Replacement}) {
+    stall;
+  }
+
+  transition({IS_D, IM_D}, Inv) {
+    stall_fwd;
+  }
+
+  transition(IML_D, Inv) {
+    stall_fwd;
+  }
+
+  transition(IS_D, Data, S) {
+    toc;
+        writeDataToCache;
+        deallocateTBE;
+        externalLoadHit;
+        popResponseQueue;
+    kd_wakeUpDependents;
+  }
+  transition(IS_D, ExData, M) {
+    toc;
+        writeDataToCache;
+        deallocateTBE;
+        externalLoadHit;
+        popResponseQueue;
+    kd_wakeUpDependents;
+  }
+
+
+  // transition({IM_AD, IM_A}, {Load, Store, Replacement}) {
+  //   stall;
+  // }
+
+  transition(IM_D, Data, M) {
+    toc;
+      writeDataToCache;
+      deallocateTBE;
+      externalStoreHit;
+      popResponseQueue;
+    kd_wakeUpDependents;
+  }
+
+  transition(IML_D, Data, L) {
+    toc;
+    writeDataToCache;
+    deallocateTBE;
+    externalLoadHit;
+    ll_scheduleLoadLinkedLockTimeout;
+    popResponseQueue;
+  }
+
+  transition(L, LLSC_Timeout, M) {
+    ll_unsetLoadLinkedLockTimer;
+    kd_wakeUpDependents;
+  }
+
+  transition({I, S, M}, Failed_SC) {
+    hhc_store_fail;
+    popMandatoryQueue;
+  }
+
+  transition(L, Unlock, M) {
+    storeHit;
+    popMandatoryQueue;
+    kd_wakeUpDependents;
+    ll_unsetLoadLinkedLockTimer;
+  }
+
+  transition(L, {Lock,Load}) {
+    loadHit;
+    popMandatoryQueue;
+  }
+
+  transition({S, M}, {Load, Ifetch}) {
+      loadHit;
+      popMandatoryQueue;
+  }
+
+  transition(S, Store, IM_D) {
+    tic;
+      deallocateCacheBlock;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+  }
+
+  transition(S, Replacement, I) {
+      tic;
+      deallocateCacheBlock;
+      forwardEviction;
+      kd_wakeUpDependents;
+  }
+
+  transition(M, Replacement, I) {
+    tic;
+    sendPutM;
+    deallocateCacheBlock;
+    forwardEviction;
+  }
+
+  transition(M, Inv, I) {
+    sendWBData;
+    deallocateCacheBlock;
+    popForwardQueue;
+    forwardEviction;
+  }
+
+  transition(S, Inv, I) {
+      deallocateCacheBlock;
+      forwardEviction;
+      popForwardQueue;
+  }
+  transition(I, Inv) {
+    popForwardQueue;
+  }
+
+  transition(M, Store) {
+      storeHit;
+      popMandatoryQueue;
+  }
+
+  transition(M, Lock, L) {
+    loadHit;
+    popMandatoryQueue;
+    ll_scheduleLoadLinkedLockTimeout;
+  }
+
+  transition(M, Unlock) {
+    storeHit;
+    popMandatoryQueue;
+  }
+
+  transition({I,M,S}, Stall) {
+    stall;
+  }
+
+  transition(L, Replacement) {
+    stall;
+  }
+
+  transition(L, Inv) {
+    stall_fwd;
+  }
+
+  // Begin transitions on spin lock request/phases
+  // ##############################################
+
+    transition({I}, EnqueueLL, IEO_D) {
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition({S}, EnqueueLL, IEO_D) {
+      deallocateCacheBlock;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition(IEO_D, Data, EQP_O) {
+      ll_scheduleLoadLinkedLockTimeout;
+      writeDataToCache;
+      deallocateTBE;
+      externalLoadHit;
+      popResponseQueue;
+    }
+
+    transition(IE_D, Data, EQP) {
+      ll_scheduleLoadLinkedLockTimeout;
+      writeDataToCache;
+      deallocateTBE;
+      externalLoadHit;
+      popResponseQueue;
+    }
+
+    transition(I, EnqueueI, IM_D) {
+      tic;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition(M, EnqueueW, EQ_O) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(L, EnqueueLL, EQP_O) {
+      ll_unsetLoadLinkedLockTimer;
+      ll_scheduleLoadLinkedLockTimeout;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    // [ANIRUDH] Can this happen....?
+    // [TODO]
+    transition(EQ_OI, EnqueueLL, EQP_O) {
+      ll_scheduleLoadLinkedLockTimeout;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, EnqueueLL, EQP_O) {
+      ll_scheduleLoadLinkedLockTimeout;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, EnqueueI) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQP_O, EnqueueSC, EQ_O) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQP, EnqueueSC, EQ) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQP_O, EnqueueSCI, EQ_OI) {
+      ll_unsetLoadLinkedLockTimer;
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQ_OI, Inv, I) {
+      sendWBData;
+      deallocateCacheBlock;
+      popForwardQueue;
+      forwardEviction;
+    }
+
+    transition(EQP, EnqueueSCI, I) {
+      storeHit;
+      ll_unsetLoadLinkedLockTimer;
+      deallocateCacheBlock;
+      forwardEviction;
+      popMandatoryQueue;
+    }
+
+    transition(I, {EnqueueW,Transfer}) {
+      // an enqueue write command on an invalid line
+      // invariant: there should exist another core
+      // that has the line in a valid state
+      // push the data out and pop
+      bufferHit;
+      sendPushDataD;
+      sendPushData;
+      popMandatoryQueue;
+    }
+
+    transition(EQ, Acquire, A) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(EQ_O, Acquire, A_O) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(A_O, Acquire) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(A, Acquire, TA) {
+      // we tried acquire again without seeing a release in between
+      // this means we have not acquired, rather trying to acquire
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(TA, Acquire) {
+      // remain in the same state
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition({A,I}, Release, R_D) {
+      allocateTBE;
+      sendGetS;
+      popMandatoryQueue;
+    }
+
+    transition({A_O}, Release, R_O) {
+      setReleased;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition({R,R_O}, Release) {
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(M, Release) {
+      setReleased;
+      loadHit;
+      popMandatoryQueue;
+    }
+
+    transition(R_D, Data, R) {
+      setReleased;
+      deallocateTBE;
+      writeDataToCache;
+      externalLoadHit;
+      popResponseQueue;
+    }
+
+    transition({R}, Transfer, I) {
+      // once transfer is initiated, send the updated data
+      // to store on the bus; other cores that have the CL
+      // will locally update their CLs with the new data
+      storeHit;
+      // [TODO] We need to send the writeback data (sendWBData)
+      sendWBData;
+      sendPushData;
+      popMandatoryQueue;
+    }
+
+    transition({EQ,EQ_O,M}, {Data,ExData}) {
+      coalesceDataResponseToCache;
+      //writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition(TA, Data, EQ) {
+      writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition(A_O, {ExData,Data}) {
+      coalesceDataResponseToCache;
+      //writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition({R, R_O}, {ExData,Data}) {
+      coalesceDataResponseToCache;
+      //writeDataToCache;
+      popResponseQueue;
+    }
+
+    transition(I, Data) {
+      // do nothing..
+      popResponseQueue;
+    }
+
+    transition({EQ,EQ_O}, LLSC_Timeout) {
+      ll_unsetLoadLinkedLockTimer;
+    }
+
+    transition({R}, {Load}, S) {
+        loadHit;
+        setUnreleased;
+        popMandatoryQueue;
+    }
+
+    transition({R_O}, {Load}, M) {
+        loadHit;
+        setUnreleased;
+        popMandatoryQueue;
+    }
+
+    transition({R}, Store, IM_D) {
+     deallocateCacheBlock;
+      allocateDCacheBlock;
+      allocateTBE;
+      sendGetM;
+      popMandatoryQueue;
+    }
+
+    transition({R, R_O}, EnqueueI, M) {
+      storeHit;
+      popMandatoryQueue;
+    }
+
+    transition({R,R_O}, Replacement, I) {
+        deallocateCacheBlock;
+        forwardEviction;
+    }
+
+    // ANI: Check this for lock event on EQ_OI
+    transition(EQ_OI, Lock, L) {
+        loadHit;
+        ll_scheduleLoadLinkedLockTimeout;
+        popMandatoryQueue;
+    }
+
+    transition({EQ,EQ_O}, EnqueueW) {
+      storeHit;
+      // [ANIRUDH] Do we need sendPushData here...?
+      sendPushDataD;
+      sendPushData;
+      popMandatoryQueue;
+    }
+
+  // ##############################################
+}

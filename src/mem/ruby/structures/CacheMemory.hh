@@ -103,6 +103,13 @@ class CacheMemory : public SimObject
 
     // find an unused entry and sets the tag appropriate for the address
     AbstractCacheEntry* allocate(Addr address, AbstractCacheEntry* new_entry);
+
+#if defined (BESPOKE)
+    AbstractCacheEntry* allocateLineBuffer(Addr address, AbstractCacheEntry* new_entry);
+    AbstractCacheEntry* allocateLineBuffer(Addr address, AbstractCacheEntry* new_entry, int coreID);
+    AbstractCacheEntry* deallocateLineBuffer(Addr address);
+    AbstractCacheEntry* getLineBuffer();
+#endif
     void allocateVoid(Addr address, AbstractCacheEntry* new_entry)
     {
         allocate(address, new_entry);
@@ -117,6 +124,7 @@ class CacheMemory : public SimObject
     // looks an address up in the cache
     AbstractCacheEntry* lookup(Addr address);
     const AbstractCacheEntry* lookup(Addr address) const;
+    int lookupCode(Addr address);
 
     Cycles getTagLatency() const { return tagArray.getLatency(); }
     Cycles getDataLatency() const { return dataArray.getLatency(); }
@@ -184,6 +192,15 @@ class CacheMemory : public SimObject
     // The second index is the the amount associativity.
     std::unordered_map<Addr, int> m_tag_index;
     std::vector<std::vector<AbstractCacheEntry*> > m_cache;
+#if defined (BESPOKE)
+    // For cache transitions on invalid cache lines (ENQUEUEW, TRANSFER)
+    // the bespoke cache coherence mechanism simply creates a proxy cache line
+    // with the specific data bytes set and then pushes this cache line data to
+    // the system which is then coalesced by the receiver
+    AbstractCacheEntry* lineBuffer;
+    // For ZIV LLC, we may need a line buffer per core resulting in line buffer array
+    AbstractCacheEntry* lineBufferArr[16];
+#endif
 
     /** We use the replacement policies from the Classic memory system. */
     replacement_policy::Base *m_replacementPolicy_ptr;

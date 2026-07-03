@@ -50,6 +50,11 @@ SimObject('WireBuffer.py', sim_objects=['RubyWireBuffer'])
 if env['CONF']['RUBY_PROTOCOL_LC_MSI']:
   SimObject('XYZCache.py', sim_objects=['XYZCache'])
   SimObject('XYZStatsObject.py', sim_objects=['XYZStatsObject'])
+if env['CONF']['RUBY_PROTOCOL_LC_MSI_ql']:
+  SimObject('XYZCache.py', sim_objects=['XYZCache'])
+  SimObject('XYZStatsObject.py', sim_objects=['XYZStatsObject'])
+
+
 
 Source('DirectoryMemory.cc')
 Source('CacheMemory.cc')
@@ -64,5 +69,8 @@ Source('TBEStorage.cc')
 if env['CONF']['RUBY_PROTOCOL_CHI']:
     Source('MN_TBETable.cc')
 if env['CONF']['RUBY_PROTOCOL_LC_MSI']:
+    Source('XYZCacheMemory.cc')
+    Source('XYZStatsObject.cc')
+if env['CONF']['RUBY_PROTOCOL_LC_MSI_ql']:
     Source('XYZCacheMemory.cc')
     Source('XYZStatsObject.cc')

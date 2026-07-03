@@ -1173,7 +1173,6 @@ machine(MachineType:L0Cache, "MESI Directory L0 Cache")
   }
 
   // store conditionals
-
   transition({I,S,E,M,LLSC_E,LLSC_M}, Failed_SC) {
     // IS,IM,SM don't handle store conditionals
     hhc_storec_fail;

@@ -1,0 +1,84 @@
+enumeration(CoherenceRequestType, desc="Types of request messages") {
+    GetS,       desc="Request from cache for a block with read permission";
+    GetM,       desc="Request from cache for a block with write permission";
+    PutS,       desc="Sent to directory when evicting a block in S (clean WB)";
+    PutM,       desc="Sent to directory when evicting a block in M";
+    PushData,   desc="Send push data command to next level";
+
+    // "Requests" from the directory to the caches on the fwd network
+    Inv,        desc="Probe the cache and invalidate any matching blocks";
+    PutAck,     desc="The put request has been processed.";
+}
+
+enumeration(CoherenceResponseType, desc="Types of response messages") {
+    PushData,   desc="";
+    BroadcastData,   desc="";
+    Data,       desc="Contains the most up-to-date data";
+    ExData,     desc="Contains the most up-to-date data";
+    InvAck,     desc="Message from another cache that they have inv. the blk";
+}
+
+structure(RequestMsg, desc="Used for Cache->Dir and Fwd messages",
+          interface="Message") {
+    // NOTE: You can't name addr "Addr" because it would conflict with the
+    // Addr *type*.
+    Addr addr,                   desc="Physical address for this request";
+    Addr waddr,                  desc="Physical word address of modified CL";
+    CoherenceRequestType Type,   desc="Type of request";
+    MachineID Requestor,         desc="Node who initiated the request";
+    NetDest Destination,         desc="Multicast destination mask";
+    DataBlock DataBlk,           desc="data for the cache line";
+    // NOTE: You *must* use MessageSize as the name of this variable, and it's
+    int size,                    desc="size in bytes of modified words";
+    // required that you have a MessageSize for each type of message. You will
+    // the the error "panic: MessageSizeType() called on wrong message!"
+    MessageSizeType MessageSize, desc="size category of the message";
+
+    MachineID OriginalRequestor, desc="Only used in back-invalidation case to check who is the original requestor";
+    int SetIdx,                  desc="The set index used to identify ROC";
+
+    bool is_reordered,            desc="Is this request ordered previously? This is used in TDMSwitch to decide whether put it in the back or in the front";
+    bool isWritebackRequest,      desc="Is this writeback request a writeback (or a demand request if false)";
+
+    // This must be overridden here to support functional accesses
+    bool functionalRead(Packet *pkt) {
+        // Requests should never have the only copy of the most up-to-date data
+        return false;
+    }
+
+    bool functionalWrite(Packet *pkt) {
+        // No check on message type required since the protocol should read
+        // data block from only those messages that contain valid data
+        return testAndWrite(addr, DataBlk, pkt);
+    }
+}
+
+structure(ResponseMsg, desc="Used for Dir->Cache and Fwd message responses",
+          interface="Message") {
+    Cycles reqID,             default="Cycles(0)", desc="Associated request ID";
+    Addr addr,                   desc="Physical address for this response";
+    Addr waddr,             desc="Physical word address of modified CL";
+    CoherenceResponseType Type,  desc="Type of response";
+    MachineID Sender,            desc="Node who is responding to the request";
+    int size,                    desc="size in bytes of modified words";
+    NetDest Destination,         desc="Multicast destination mask";
+    DataBlock DataBlk,           desc="data for the cache line";
+    MessageSizeType MessageSize, desc="size category of the message";
+    int Acks,                    desc="Number of acks required from others";
+
+    MachineID OriginalRequestor, desc="Only used in back-invalidation case to check who is the original requestor";
+
+    // This must be overridden here to support functional accesses
+    bool functionalRead(Packet *pkt) {
+        if (Type == CoherenceResponseType:Data || Type == CoherenceResponseType:ExData) {
+            return testAndRead(addr, DataBlk, pkt);
+        }
+        return false;
+    }
+
+    bool functionalWrite(Packet *pkt) {
+        // No check on message type required since the protocol should read
+        // data block from only those messages that contain valid data
+        return testAndWrite(addr, DataBlk, pkt);
+    }
+}

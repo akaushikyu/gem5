@@ -128,7 +128,7 @@ class Switch(BasicRouter):
         WeightBased(adaptive_routing=False), "Routing strategy to be used"
     )
 
-    if buildEnv["PROTOCOL"] == "LC_MSI":
+    if buildEnv["PROTOCOL"] == "LC_MSI" or buildEnv["PROTOCOL"] == "LC_MSI_ql":
         ncore = Param.Int(1, "Number of cores")
         work_conserving = Param.Bool(
             False, "Whether work-conserving RR is enabled"

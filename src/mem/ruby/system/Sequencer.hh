@@ -343,6 +343,11 @@ class Sequencer : public RubyPort
      */
     bool llscStoreConditional(const Addr);
 
+#if defined (BESPOKE)
+    void setReplImmune(const Addr laddr);
+    void clearReplImmune(const Addr laddr);
+#endif
+
 
     /**
      * Increment the unaddressed transaction counter

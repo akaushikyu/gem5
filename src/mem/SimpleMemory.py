@@ -47,6 +47,7 @@ class SimpleMemory(AbstractMemory):
 
     port = ResponsePort("This port sends responses and receives requests")
     latency = Param.Latency("50ns", "Request to response latency")
+    #latency = Param.Latency("100ns", "Request to response latency")
     latency_var = Param.Latency("0ns", "Request to response latency variance")
     # The memory bandwidth limit default is set to 12.8GiB/s which is
     # representative of a x64 DDR3-1600 channel.

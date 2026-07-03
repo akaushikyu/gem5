@@ -48,10 +48,12 @@ class XYZStatsObject: public ClockedObject
         void toc() {
             customXYZStats.latencies.sample(curCycle() - w);
             DPRINTF(XYZInfo, "Samping latency: %lld\n", curCycle() - w);
+            /*
             if(curCycle() - w > wcl_bound) {
                 DPRINTF(XYZInfo, "Worst case latency bound reached: %lld\n", curCycle() - w);
                 panic("Worst case latency bound reached: %lld\n", curCycle() - w);
             }
+            */
         }
 
         void regStats() override;

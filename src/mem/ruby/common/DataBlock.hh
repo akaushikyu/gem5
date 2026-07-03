@@ -112,6 +112,10 @@ class DataBlock
     bool isAlloc() const { return m_alloc; }
     void realloc(int blk_size);
 
+#if defined (BESPOKE)
+    void coalesce(const DataBlock &dblk, const Addr waddr, const int size);
+#endif
+
   private:
     void alloc();
     uint8_t *m_data = nullptr;
@@ -121,6 +125,30 @@ class DataBlock
     // Tracks block changes when atomic ops are applied
     std::deque<uint8_t*> m_atomicLog;
 };
+
+#if defined (BESPOKE)
+// [ANI] Coalesce data blocks
+// used in excl_ql protocol
+inline void
+DataBlock::coalesce(
+    const DataBlock &dblk,
+    const Addr waddr,
+    const int size) {
+  // assuming 64B cache line size
+  // input data is the updated data cache line
+  // with specific bytes set. If the byte is set,
+  // then coalesce
+
+  // waddr is the word address
+  // waddr % clSize is the offset in the CL
+  // that holds the modifications
+  const int clSize = 64;
+  int offset = waddr % clSize;
+  for (unsigned i = 0; i < size; i++) {
+    m_data[i+offset] = dblk.m_data[i+offset];
+  }
+}
+#endif
 
 inline void
 DataBlock::assign(uint8_t *data)

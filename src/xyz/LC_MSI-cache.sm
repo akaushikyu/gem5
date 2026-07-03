@@ -197,7 +197,6 @@ machine(MachineType:L1Cache, "LC_MSI cache")
   out_port(response_out, ResponseMsg, responseToDirOrSibling);
   out_port(response_out_bus, ResponseMsg, responseToDirOnly);
 
-
   in_port(responseFromL0_in, ResponseMsg, responseFromL0) {
     if(responseFromL0_in.isReady(clockEdge())) {
         peek(responseFromL0_in, ResponseMsg) {

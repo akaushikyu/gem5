@@ -1,0 +1,13 @@
+Import('*')
+
+SimObject('TraceTester.py', sim_objects=['TraceTester'])
+
+Source('TraceTester.cc')
+
+DebugFlag('TraceTester')
+
+if env['CONF']['PROTOCOL'] == 'EXCL_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])
+
+if env['CONF']['PROTOCOL'] == 'LC_MSI_ql':
+  env.Append(CPPDEFINES=['BESPOKE'])

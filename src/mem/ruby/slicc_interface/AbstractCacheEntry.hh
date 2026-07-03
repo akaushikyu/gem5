@@ -101,11 +101,23 @@ class AbstractCacheEntry : public ReplaceableEntry
     void clearLocked();
     bool isLocked(int context) const;
 
+#if defined (BESPOKE)
+    void setReplImmune(int context);
+    void clearReplImmune();
+    bool isReplImmune() const;
+#endif
+
     // Address of this block, required by CacheMemory
     Addr m_Address;
     // Holds info whether the address is locked.
     // Required for implementing LL/SC operations.
     int m_locked;
+
+    // Holds info whether the address is immune to
+    // replacement
+#if defined (BESPOKE)
+    int m_replImmune;
+#endif
 
     AccessPermission m_Permission; // Access permission for this
                                    // block, required by CacheMemory
