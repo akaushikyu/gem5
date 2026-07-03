@@ -561,7 +561,7 @@ System::logInfo(const char *fmt...) {
     }
     fmt++;
   }
-  logFile << "\n";
+  logFile << std::endl;
 }
 
 } // namespace gem5
