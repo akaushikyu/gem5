@@ -2639,14 +2639,13 @@ BaseCache::MemSidePort::recvTimingResp(PacketPtr pkt)
 }
 
 // Express snooping requests to memside port
-void
+bool
 BaseCache::MemSidePort::recvTimingSnoopReq(PacketPtr pkt)
 {
     // Snoops shouldn't happen when bypassing caches
     assert(!cache->system->bypassCaches());
 
-    // handle snooping requests
-    cache->recvTimingSnoopReq(pkt);
+    return cache->recvTimingSnoopReq(pkt);
 }
 
 Tick

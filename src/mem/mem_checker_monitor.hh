@@ -115,9 +115,9 @@ class MemCheckerMonitor : public SimObject
             return mon.recvTimingResp(pkt);
         }
 
-        void recvTimingSnoopReq(PacketPtr pkt)
+        bool recvTimingSnoopReq(PacketPtr pkt)
         {
-            mon.recvTimingSnoopReq(pkt);
+            return mon.recvTimingSnoopReq(pkt);
         }
 
         void recvRangeChange()
@@ -212,7 +212,7 @@ class MemCheckerMonitor : public SimObject
 
     bool recvTimingResp(PacketPtr pkt);
 
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     bool recvTimingSnoopResp(PacketPtr pkt);
 

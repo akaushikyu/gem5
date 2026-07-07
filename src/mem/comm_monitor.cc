@@ -471,10 +471,10 @@ CommMonitor::recvTimingResp(PacketPtr pkt)
     return successful;
 }
 
-void
+bool
 CommMonitor::recvTimingSnoopReq(PacketPtr pkt)
 {
-    cpuSidePort.sendTimingSnoopReq(pkt);
+    return cpuSidePort.sendTimingSnoopReq(pkt);
 }
 
 bool

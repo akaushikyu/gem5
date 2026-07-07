@@ -162,6 +162,16 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
               PacketList &writebacks)
 {
 
+    if (llscTrack.getActive()) {
+      llscTrack.checkAndUnset_TBE(curCycle());
+    }
+
+    if (pkt->isLL()) {
+      llscTrack.setupTracker(pkt->getAddr(), curCycle());
+    } else if (pkt->isSC()) {
+      llscTrack.unsetActive();
+    }
+
     if (pkt->req->isUncacheable()) {
         assert(pkt->isRequest());
 
@@ -1257,14 +1267,21 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
 }
 
 
-void
+bool
 Cache::recvTimingSnoopReq(PacketPtr pkt)
 {
     DPRINTF(CacheVerbose, "%s: for %s\n", __func__, pkt->print());
 
     // no need to snoop requests that are not in range
     if (!inRange(pkt->getAddr())) {
-        return;
+        return true;
+    }
+
+    if (llscTrack.getActive() && llscTrack.getLLSCAddr() == pkt->getAddr()) {
+      // [ANIRUDH] Snoop is active, return false and try again
+      // [ANIRUDH] TODO: Need to check the address of the snoop
+      DPRINTF(Cache, "NOT DOING SNOOP AS LL IS ACTIVE for %s\n", pkt->print());
+      return false;
     }
 
     bool is_secure = pkt->isSecure();
@@ -1287,7 +1304,7 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
         DPRINTF(Cache, "Setting block cached for %s from lower cache on "
                 "mshr hit\n", pkt->print());
         pkt->setBlockCached();
-        return;
+        return true;
     }
 
     // Let the MSHR itself track the snoop and decide whether we want
@@ -1299,7 +1316,7 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
 
         if (mshr->getNumTargets() > numTarget)
             warn("allocating bonus target for snoop"); //handle later
-        return;
+        return true;
     }
 
     //We also need to check the writeback buffers and handle those
@@ -1324,7 +1341,7 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
             pkt->setBlockCached();
             DPRINTF(Cache, "%s: Squashing %s from lower cache on writequeue "
                     "hit\n", __func__, pkt->print());
-            return;
+            return true;
         }
 
         // conceptually writebacks are no different to other blocks in
@@ -1373,6 +1390,8 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
     // also have the cost of the upwards snoops to account for
     pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay, snoop_delay +
                                          lookupLatency * clockPeriod());
+
+    return true;
 }
 
 Tick

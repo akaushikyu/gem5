@@ -312,10 +312,10 @@ MemCheckerMonitor::recvTimingResp(PacketPtr pkt)
     return successful;
 }
 
-void
+bool
 MemCheckerMonitor::recvTimingSnoopReq(PacketPtr pkt)
 {
-    cpuSidePort.sendTimingSnoopReq(pkt);
+    return cpuSidePort.sendTimingSnoopReq(pkt);
 }
 
 bool

@@ -183,7 +183,7 @@ class SysBridge : public SimObject
             }
         }
 
-        void
+        bool
         recvTimingSnoopReq(PacketPtr pkt) override
         {
             DPRINTF(SysBridge, "recvTimingSnoopReq incoming ID %d.\n",
@@ -192,7 +192,7 @@ class SysBridge : public SimObject
             pkt->pushSenderState(state);
             DPRINTF(SysBridge, "recvTimingSnoopReq outgoing ID %d.\n",
                     pkt->requestorId());
-            sourcePort->sendTimingSnoopReq(pkt);
+            return sourcePort->sendTimingSnoopReq(pkt);
         }
 
         void recvReqRetry() override { sourcePort->sendRetryReq(); }

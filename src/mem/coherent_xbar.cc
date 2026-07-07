@@ -506,7 +506,7 @@ CoherentXBar::recvTimingResp(PacketPtr pkt, PortID mem_side_port_id)
     return true;
 }
 
-void
+bool
 CoherentXBar::recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id)
 {
     DPRINTF(CoherentXBar, "%s: src %s packet %s\n", __func__,
@@ -564,6 +564,7 @@ CoherentXBar::recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id)
     // wrong, hence there is nothing further to do as the packet
     // would be going back to where it came from
     assert(findPort(pkt) == mem_side_port_id);
+    return true;
 }
 
 bool

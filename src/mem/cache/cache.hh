@@ -104,7 +104,7 @@ class Cache : public BaseCache
     void serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt,
                             CacheBlk *blk) override;
 
-    void recvTimingSnoopReq(PacketPtr pkt) override;
+    bool recvTimingSnoopReq(PacketPtr pkt) override;
 
     void recvTimingSnoopResp(PacketPtr pkt) override;
 
@@ -160,6 +160,39 @@ class Cache : public BaseCache
   public:
     /** Instantiates a basic cache object. */
     Cache(const CacheParams &p);
+
+    struct LLSCTracker {
+      bool LLActive = false;
+      // Address of LL/SC
+      Addr addr;
+      // Cycle when LL was observed
+      Cycles LLCycle;
+      // TODO: Other execution environments
+
+      bool getActive() { return LLActive; }
+      Cycles getLLCycle() { return LLCycle; }
+      Addr getLLSCAddr() { return addr; }
+      void unsetActive() { LLActive = false; }
+
+      void checkAndUnset_TBE(Cycles currCycle) {
+        if (!LLActive)
+          return;
+        // if there is an active LL, check the current tick
+        // and determine whether to unset the active LL and allow
+        // for snoops
+        if (currCycle - LLCycle > Cycles(100)) {
+          unsetActive();
+        }
+      }
+
+      void setupTracker(Addr _addr, Cycles _curCycle) {
+        LLActive = true;
+        addr = _addr;
+        LLCycle= _curCycle;
+      }
+    };
+
+    LLSCTracker llscTrack;
 
     /**
      * Take an MSHR, turn it into a suitable downstream packet, and

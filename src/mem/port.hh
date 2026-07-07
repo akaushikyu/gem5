@@ -312,7 +312,7 @@ class RequestPort: public Port, public AtomicRequestProtocol,
         panic("%s was not expecting a functional snoop request\n", name());
     }
 
-    void
+    bool
     recvTimingSnoopReq(PacketPtr pkt) override
     {
         panic("%s was not expecting a timing snoop request.\n", name());
@@ -471,11 +471,16 @@ class ResponsePort : public Port, public AtomicResponseProtocol,
      *
      * @param pkt Packet to send.
      */
-    void
+    // [ANIRUDH] Changing sendTimingSnoopReq to bool
+    bool
     sendTimingSnoopReq(PacketPtr pkt)
     {
         try {
-            TimingResponseProtocol::sendSnoopReq(_requestPort, pkt);
+            _requestPort->removeTrace(pkt);
+            bool succ = TimingResponseProtocol::sendSnoopReq(_requestPort, pkt);
+            if (!succ)
+              _requestPort->addTrace(pkt);
+            return succ;
         } catch (UnboundPortException) {
             reportUnbound();
         }

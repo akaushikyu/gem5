@@ -1474,6 +1474,16 @@ class Packet : public Printable, public Extensible<Packet>
         return cmd == MemCmd::HardPFReq || isEviction();
     }
 
+    bool
+    isSC() const {
+      return cmd == MemCmd::StoreCondReq;
+    }
+
+    bool
+    isLL() const {
+      return cmd == MemCmd::LoadLockedReq;
+    }
+
     /**
      * Is this packet a clean eviction, including both actual clean
      * evict packets, but also clean writebacks.

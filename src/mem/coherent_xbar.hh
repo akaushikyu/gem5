@@ -185,7 +185,7 @@ class CoherentXBar : public BaseXBar
             return xbar.recvTimingResp(pkt, id);
         }
 
-        void
+        bool
         recvTimingSnoopReq(PacketPtr pkt) override
         {
             return xbar.recvTimingSnoopReq(pkt, id);
@@ -307,7 +307,7 @@ class CoherentXBar : public BaseXBar
 
     bool recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id);
     bool recvTimingResp(PacketPtr pkt, PortID mem_side_port_id);
-    void recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id);
+    bool recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id);
     bool recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id);
     void recvReqRetry(PortID mem_side_port_id);
 

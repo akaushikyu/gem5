@@ -440,7 +440,7 @@ LSQ::recvTimingResp(PacketPtr pkt)
     return true;
 }
 
-void
+bool
 LSQ::recvTimingSnoopReq(PacketPtr pkt)
 {
     DPRINTF(LSQ, "received pkt for addr:%#x %s\n", pkt->getAddr(),
@@ -467,6 +467,7 @@ LSQ::recvTimingSnoopReq(PacketPtr pkt)
         // In case no units have pending ops, just go ahead
         checkStaleTranslations();
     }
+    return true;
 }
 
 int
@@ -1414,7 +1415,7 @@ LSQ::DcachePort::recvTimingResp(PacketPtr pkt)
     return lsq->recvTimingResp(pkt);
 }
 
-void
+bool
 LSQ::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
 {
     for (ThreadID tid = 0; tid < cpu->numThreads; tid++) {
@@ -1422,7 +1423,7 @@ LSQ::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
             cpu->wakeup(tid);
         }
     }
-    lsq->recvTimingSnoopReq(pkt);
+    return lsq->recvTimingSnoopReq(pkt);
 }
 
 void

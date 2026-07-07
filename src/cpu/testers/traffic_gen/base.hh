@@ -142,7 +142,7 @@ class BaseTrafficGen : public ClockedObject
         bool recvTimingResp(PacketPtr pkt)
         { return trafficGen.recvTimingResp(pkt); }
 
-        void recvTimingSnoopReq(PacketPtr pkt) { }
+        bool recvTimingSnoopReq(PacketPtr pkt) { }
 
         void recvFunctionalSnoop(PacketPtr pkt) { }
 

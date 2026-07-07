@@ -98,7 +98,7 @@ class LSQ
          * completing the load or store that has returned from
          * memory. */
         virtual bool recvTimingResp(PacketPtr pkt);
-        virtual void recvTimingSnoopReq(PacketPtr pkt);
+        virtual bool recvTimingSnoopReq(PacketPtr pkt);
 
         virtual void
         recvFunctionalSnoop(PacketPtr pkt)
@@ -867,7 +867,7 @@ class LSQ
      */
     bool recvTimingResp(PacketPtr pkt);
 
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     Fault pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
                       unsigned int size, Addr addr, Request::Flags flags,

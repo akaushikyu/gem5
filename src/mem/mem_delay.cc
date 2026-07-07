@@ -119,10 +119,10 @@ MemDelay::RequestPort::recvAtomicSnoop(PacketPtr pkt)
     return delay + parent.responsePort.sendAtomicSnoop(pkt);
 }
 
-void
+bool
 MemDelay::RequestPort::recvTimingSnoopReq(PacketPtr pkt)
 {
-    parent.responsePort.sendTimingSnoopReq(pkt);
+    return parent.responsePort.sendTimingSnoopReq(pkt);
 }
 
 

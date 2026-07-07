@@ -111,7 +111,7 @@ class LSQ : public Named
 
         bool isSnooping() const override { return true; }
 
-        void recvTimingSnoopReq(PacketPtr pkt) override
+        bool recvTimingSnoopReq(PacketPtr pkt) override
         { return lsq.recvTimingSnoopReq(pkt); }
 
         void recvFunctionalSnoop(PacketPtr pkt) override { }
@@ -725,7 +725,7 @@ class LSQ : public Named
     /** Memory interface */
     bool recvTimingResp(PacketPtr pkt);
     void recvReqRetry();
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     /** Return the raw-bindable port */
     MinorCPU::MinorCPUPort &getDcachePort() { return dcachePort; }

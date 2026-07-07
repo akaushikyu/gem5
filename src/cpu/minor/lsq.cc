@@ -1758,7 +1758,7 @@ operator <<(std::ostream &os, LSQ::MemoryState state)
     return os;
 }
 
-void
+bool
 LSQ::recvTimingSnoopReq(PacketPtr pkt)
 {
     /* LLSC operations in Minor can't be speculative and are executed from
@@ -1776,6 +1776,7 @@ LSQ::recvTimingSnoopReq(PacketPtr pkt)
                     pkt, cacheBlockMask);
         }
     }
+    return true;
 }
 
 void

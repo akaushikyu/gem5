@@ -977,6 +977,8 @@ ISA::handleLockedWrite(const RequestPtr &req, Addr cacheBlockMask)
 
         // Must clear any reservations
         load_reservation_addr = INVALID_RESERVATION_ADDR;
+        DPRINTF(LLSC, "[cid:%d]: SC failure! Current locked addr = %x.\n",
+            req->contextId(), load_reservation_addr & cacheBlockMask);
 
         return false;
     }

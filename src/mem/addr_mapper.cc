@@ -191,10 +191,10 @@ AddrMapper::recvTimingResp(PacketPtr pkt)
     return successful;
 }
 
-void
+bool
 AddrMapper::recvTimingSnoopReq(PacketPtr pkt)
 {
-    cpuSidePort.sendTimingSnoopReq(pkt);
+    return cpuSidePort.sendTimingSnoopReq(pkt);
 }
 
 bool

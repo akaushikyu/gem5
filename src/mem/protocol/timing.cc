@@ -83,12 +83,12 @@ TimingResponseProtocol::sendResp(TimingRequestProtocol *peer, PacketPtr pkt)
     return peer->recvTimingResp(pkt);
 }
 
-void
+bool
 TimingResponseProtocol::sendSnoopReq(
         TimingRequestProtocol *peer, PacketPtr pkt)
 {
     assert(pkt->isRequest());
-    peer->recvTimingSnoopReq(pkt);
+    return peer->recvTimingSnoopReq(pkt);
 }
 
 void

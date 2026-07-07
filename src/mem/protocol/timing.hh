@@ -106,7 +106,7 @@ class TimingRequestProtocol
     /**
      * Receive a timing snoop request from the peer.
      */
-    virtual void recvTimingSnoopReq(PacketPtr pkt) = 0;
+    virtual bool recvTimingSnoopReq(PacketPtr pkt) = 0;
 
     /**
      * Called by the peer if sendTimingReq was called on this peer (causing
@@ -149,7 +149,10 @@ class TimingResponseProtocol
      * @param peer Peer to send the packet to.
      * @param pkt Packet to send.
      */
-    void sendSnoopReq(TimingRequestProtocol *peer, PacketPtr pkt);
+    bool sendSnoopReq(TimingRequestProtocol *peer, PacketPtr pkt);
+
+    // [ANIRUDH] Adding sendRetrySnoopReq
+    void sendRetrySnoopReq(TimingRequestProtocol *peer);
 
     /**
      * Send a retry to the peer that previously attempted a

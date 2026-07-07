@@ -141,10 +141,10 @@ class AddrMapper : public SimObject
             return mapper.recvTimingResp(pkt);
         }
 
-        void
+        bool
         recvTimingSnoopReq(PacketPtr pkt) override
         {
-            mapper.recvTimingSnoopReq(pkt);
+            return mapper.recvTimingSnoopReq(pkt);
         }
 
         void
@@ -252,7 +252,7 @@ class AddrMapper : public SimObject
 
     bool recvTimingResp(PacketPtr pkt);
 
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     bool recvTimingSnoopResp(PacketPtr pkt);
 

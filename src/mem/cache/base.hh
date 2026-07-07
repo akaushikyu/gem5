@@ -231,7 +231,7 @@ class BaseCache : public ClockedObject
 
       protected:
 
-        virtual void recvTimingSnoopReq(PacketPtr pkt);
+        virtual bool recvTimingSnoopReq(PacketPtr pkt);
 
         virtual bool recvTimingResp(PacketPtr pkt);
 
@@ -571,7 +571,7 @@ class BaseCache : public ClockedObject
      * Snoops bus transactions to maintain coherence.
      * @param pkt The current bus transaction.
      */
-    virtual void recvTimingSnoopReq(PacketPtr pkt) = 0;
+    virtual bool recvTimingSnoopReq(PacketPtr pkt) = 0;
 
     /**
      * Handle a snoop response.

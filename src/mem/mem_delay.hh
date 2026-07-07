@@ -86,7 +86,7 @@ class MemDelay : public ClockedObject
 
         Tick recvAtomicSnoop(PacketPtr pkt) override;
 
-        void recvTimingSnoopReq(PacketPtr pkt) override;
+        bool recvTimingSnoopReq(PacketPtr pkt) override;
 
         void recvRangeChange() override {
             parent.responsePort.sendRangeChange();
