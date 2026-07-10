@@ -412,9 +412,10 @@ class Packet : public Printable, public Extensible<Packet>
 
     // Completed cycle
     Cycles completeCycle;
-
+#if defined (STARVATION_FREEDOM)
     // dummy snoop check
     bool isDummySnoopCheck = false;
+#endif
 
   private:
    /**

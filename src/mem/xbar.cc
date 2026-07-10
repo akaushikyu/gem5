@@ -244,6 +244,7 @@ BaseXBar::Layer<SrcType, DstType>::failedTiming(SrcType* src_port,
     occupyLayer(busy_time);
 }
 
+#if defined (STARVATION_FREEDOM)
 template <typename SrcType, typename DstType>
 void
 BaseXBar::Layer<SrcType, DstType>::failedSnoop(Tick busy_time)
@@ -259,6 +260,7 @@ BaseXBar::Layer<SrcType, DstType>::failedSnoop(Tick busy_time)
     // occupy the bus accordingly
     occupyLayer(busy_time);
 }
+#endif
 
 template <typename SrcType, typename DstType>
 void

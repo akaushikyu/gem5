@@ -106,6 +106,8 @@ class System(SimObject):
 
     cache_line_size = Param.Unsigned(64, "Cache line size in bytes")
 
+    tbe_cycle_limit = Param.Unsigned(1, "[RISCV only] Timer based EE cycle limit")
+
     redirect_paths = VectorParam.RedirectPath([], "Path redirections")
 
     exit_on_work_items = Param.Bool(

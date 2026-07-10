@@ -325,8 +325,10 @@ class CoherentXBar : public BaseXBar
         forwardTiming(pkt, exclude_cpu_side_port_id, snoopPorts);
     }
 
+#if defined (STARVATION_FREEDOM)
     bool trySnoop(PacketPtr pkt, PortID exclude_cpu_side_port_id,
                   const std::vector<QueuedResponsePort*>& dests);
+#endif
 
     /**
      * Forward a timing packet to a selected list of snoopers, potentially

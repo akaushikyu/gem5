@@ -148,8 +148,9 @@ class BaseXBar : public ClockedObject
          * @param busy_time Time to spend as a result of a failed send
          */
         void failedTiming(SrcType* src_port, Tick busy_time);
-
+#if defined (STARVATION_FREEDOM)
         void failedSnoop(Tick busy_time);
+#endif
 
         void occupyLayer(Tick until);
 

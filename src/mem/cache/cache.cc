@@ -162,8 +162,10 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
               PacketList &writebacks)
 {
 
+#if defined (STARVATION_FREEDOM)
     if (llscTrack.getActive()) {
-      llscTrack.checkAndUnset_TBE(curCycle());
+      DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
+      llscTrack.checkAndUnset_TBE(curCycle(), system->getTBECycleLimit());
     }
 
     if (pkt->isLL()) {
@@ -174,6 +176,7 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       DPRINTF(Cache, "Removing LLSC tracker for addr %x\n", pkt->getAddr());
       llscTrack.unsetActive();
     }
+#endif
 
     if (pkt->req->isUncacheable()) {
         assert(pkt->isRequest());

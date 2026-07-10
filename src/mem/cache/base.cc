@@ -2663,6 +2663,7 @@ BaseCache::MemSidePort::recvFunctionalSnoop(PacketPtr pkt)
     // Snoops shouldn't happen when bypassing caches
     assert(!cache->system->bypassCaches());
 
+ #if defined (STARVATION_FREEDOM)
     if (cache->llscTrack.getActive()) {
       DPRINTF(Cache, "Receiving snoop request when LLSC is active on %x, checking \
           against incoming packet addr %x \n", cache->llscTrack.getLLSCAddr(), pkt->getAddr());
@@ -2677,6 +2678,7 @@ BaseCache::MemSidePort::recvFunctionalSnoop(PacketPtr pkt)
       // This field in the packet is marked when we just want to do a dummy snoop
       return true;
     }
+#endif
 
     // functional snoop (note that in contrast to atomic we don't have
     // a specific functionalSnoop method, as they have the same

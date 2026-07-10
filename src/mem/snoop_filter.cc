@@ -63,6 +63,7 @@ SnoopFilter::eraseIfNullEntry(SnoopFilterCache::iterator& sf_it)
     }
 }
 
+#if defined (STARVATION_FREEDOM)
 std::pair<SnoopFilter::SnoopList, Cycles>
 SnoopFilter::functionalLookupRequest(const Packet* cpkt, const ResponsePort&
                            cpu_side_port)
@@ -72,6 +73,7 @@ SnoopFilter::functionalLookupRequest(const Packet* cpkt, const ResponsePort&
 
     return snoopAll(lookupLatency);
 }
+#endif
 
 std::pair<SnoopFilter::SnoopList, Cycles>
 SnoopFilter::lookupRequest(const Packet* cpkt, const ResponsePort&

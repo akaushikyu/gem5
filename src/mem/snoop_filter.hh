@@ -142,7 +142,7 @@ class SnoopFilter : public SimObject
     std::pair<SnoopList, Cycles> lookupRequest(const Packet* cpkt,
                                         const ResponsePort& cpu_side_port);
 
-
+#if defined (STARVATION_FREEDOM)
     /* This is a **soft** version of the lookup request function
     * in the snoop filter. This does not modify the residency of the cache
     * block in the snoop filter. It just returns to snoop all the cpu side
@@ -151,6 +151,7 @@ class SnoopFilter : public SimObject
     */
     std::pair<SnoopList, Cycles> functionalLookupRequest(const Packet* cpkt,
                                         const ResponsePort& cpu_side_port);
+#endif
 
     /**
      * For an un-successful request, revert the change to the snoop

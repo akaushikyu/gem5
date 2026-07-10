@@ -176,6 +176,7 @@ System::System(const Params &p)
                       p.shadow_rom_ranges.end()),
       memoryMode(p.mem_mode),
       _cacheLineSize(p.cache_line_size),
+      _tbe_cycle_limit(p.tbe_cycle_limit),
       numWorkIds(p.num_work_ids),
       thermalModel(p.thermal_model),
       _m5opRange(p.m5ops_base ?

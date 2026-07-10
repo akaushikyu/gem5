@@ -1,0 +1,2 @@
+config USE_SF
+  bool "Starvation freedom support"

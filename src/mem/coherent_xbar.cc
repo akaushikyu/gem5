@@ -219,7 +219,7 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
         // the packet is a memory-mapped request and should be
         // broadcasted to our snoopers but the source
         if (snoopFilter) {
-
+#if defined (STARVATION_FREEDOM)
             // Before doing operations on the snoop filter, first check if the snoop
             // can be entertained by the cpu. If the cpu is doing an active LL/SC, then
             // the snoop will not be permitted until it has finished the LL/SC or
@@ -234,8 +234,8 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
                 reqLayers[mem_side_port_id]->failedSnoop(clockEdge(Cycles(1)));
                 return false;
               }
-
             // If we are here, that means no active LLSC blocking snooping
+#endif
             // check with the snoop filter where to forward this packet
             auto sf_res = snoopFilter->lookupRequest(pkt, *src_port);
 
@@ -713,6 +713,7 @@ CoherentXBar::recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id)
     return true;
 }
 
+#if defined (STARVATION_FREEDOM)
 bool
 CoherentXBar::trySnoop(PacketPtr pkt, PortID exclude_cpu_side_port_id,
                        const std::vector<QueuedResponsePort*>& dests)
@@ -735,6 +736,7 @@ CoherentXBar::trySnoop(PacketPtr pkt, PortID exclude_cpu_side_port_id,
   pkt->isDummySnoopCheck = false;
   return true;
 }
+#endif
 
 
 bool
