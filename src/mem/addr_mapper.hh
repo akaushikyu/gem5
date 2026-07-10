@@ -123,10 +123,10 @@ class AddrMapper : public SimObject
         { }
 
       protected:
-        void
+        bool
         recvFunctionalSnoop(PacketPtr pkt) override
         {
-            mapper.recvFunctionalSnoop(pkt);
+            return mapper.recvFunctionalSnoop(pkt);
         }
 
         Tick
@@ -237,7 +237,7 @@ class AddrMapper : public SimObject
 
     void recvFunctional(PacketPtr pkt);
 
-    void recvFunctionalSnoop(PacketPtr pkt);
+    bool recvFunctionalSnoop(PacketPtr pkt);
 
     void recvMemBackdoorReq(const MemBackdoorReq &req,
                             MemBackdoorPtr &backdoor);

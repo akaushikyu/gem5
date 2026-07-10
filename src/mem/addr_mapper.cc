@@ -75,13 +75,14 @@ AddrMapper::recvFunctional(PacketPtr pkt)
     pkt->setAddr(orig_addr);
 }
 
-void
+bool
 AddrMapper::recvFunctionalSnoop(PacketPtr pkt)
 {
     Addr orig_addr = pkt->getAddr();
     pkt->setAddr(remapAddr(orig_addr));
     cpuSidePort.sendFunctionalSnoop(pkt);
     pkt->setAddr(orig_addr);
+    return true;
 }
 
 void

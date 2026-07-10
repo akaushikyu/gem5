@@ -120,6 +120,43 @@ class BaseCache : public ClockedObject
         NUM_BLOCKED_CAUSES
     };
 
+    struct LLSCTracker {
+      bool LLActive = false;
+      // Address of LL/SC
+      Addr addr;
+      // Cycle when LL was observed
+      // this is for timer-based environment (TBE)
+      Cycles LLCycle;
+      // TODO: Other execution environments
+      // IBE -- Instruction based environment
+      // CBE -- Counter based environment
+
+      bool getActive() { return LLActive; }
+      Cycles getLLCycle() { return LLCycle; }
+      Addr getLLSCAddr() { return addr; }
+      void unsetActive() { LLActive = false; }
+
+      void checkAndUnset_TBE(Cycles currCycle) {
+        if (!LLActive)
+          return;
+        // if there is an active LL, check the current tick
+        // and determine whether to unset the active LL and allow
+        // for snoops
+        // TODO: Make TBE cycle count a command line parameter
+        if (currCycle - LLCycle > Cycles(100000)) {
+          unsetActive();
+        }
+      }
+
+      void setupTracker(Addr _addr, Cycles _curCycle) {
+        LLActive = true;
+        addr = _addr;
+        LLCycle= _curCycle;
+      }
+    };
+
+    LLSCTracker llscTrack;
+
   protected:
 
     /**
@@ -237,7 +274,7 @@ class BaseCache : public ClockedObject
 
         virtual Tick recvAtomicSnoop(PacketPtr pkt);
 
-        virtual void recvFunctionalSnoop(PacketPtr pkt);
+        virtual bool recvFunctionalSnoop(PacketPtr pkt);
 
       public:
 

@@ -161,39 +161,6 @@ class Cache : public BaseCache
     /** Instantiates a basic cache object. */
     Cache(const CacheParams &p);
 
-    struct LLSCTracker {
-      bool LLActive = false;
-      // Address of LL/SC
-      Addr addr;
-      // Cycle when LL was observed
-      Cycles LLCycle;
-      // TODO: Other execution environments
-
-      bool getActive() { return LLActive; }
-      Cycles getLLCycle() { return LLCycle; }
-      Addr getLLSCAddr() { return addr; }
-      void unsetActive() { LLActive = false; }
-
-      void checkAndUnset_TBE(Cycles currCycle) {
-        if (!LLActive)
-          return;
-        // if there is an active LL, check the current tick
-        // and determine whether to unset the active LL and allow
-        // for snoops
-        if (currCycle - LLCycle > Cycles(100)) {
-          unsetActive();
-        }
-      }
-
-      void setupTracker(Addr _addr, Cycles _curCycle) {
-        LLActive = true;
-        addr = _addr;
-        LLCycle= _curCycle;
-      }
-    };
-
-    LLSCTracker llscTrack;
-
     /**
      * Take an MSHR, turn it into a suitable downstream packet, and
      * send it out. This construct allows a queue entry to choose a suitable

@@ -66,7 +66,7 @@ class FunctionalRequestProtocol
     /**
      * Receive a functional snoop request packet from the peer.
      */
-    virtual void recvFunctionalSnoop(PacketPtr pkt) = 0;
+    virtual bool recvFunctionalSnoop(PacketPtr pkt) = 0;
 
     /**
      * Send a request for a back door to a range of memory.
@@ -91,7 +91,7 @@ class FunctionalResponseProtocol
      *
      * @param pkt Snoop packet to send.
      */
-    void sendSnoop(FunctionalRequestProtocol *peer, PacketPtr pkt) const;
+    bool sendSnoop(FunctionalRequestProtocol *peer, PacketPtr pkt) const;
 
     /**
      * Receive a functional request packet from the peer.

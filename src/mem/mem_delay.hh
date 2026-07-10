@@ -82,7 +82,7 @@ class MemDelay : public ClockedObject
       protected:
         bool recvTimingResp(PacketPtr pkt) override;
 
-        void recvFunctionalSnoop(PacketPtr pkt) override;
+        bool recvFunctionalSnoop(PacketPtr pkt) override;
 
         Tick recvAtomicSnoop(PacketPtr pkt) override;
 

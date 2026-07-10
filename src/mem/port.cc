@@ -77,7 +77,7 @@ class DefaultRequestPort : public RequestPort
     void recvRetrySnoopResp() override { blowUp(); }
 
     // Functional protocol.
-    void recvFunctionalSnoop(PacketPtr) override { blowUp(); }
+    bool recvFunctionalSnoop(PacketPtr) override { blowUp(); }
 };
 
 class DefaultResponsePort : public ResponsePort

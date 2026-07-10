@@ -231,7 +231,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
          * a wakeup event on a cpu that is monitoring an address
          */
         virtual bool recvTimingSnoopReq(PacketPtr pkt);
-        virtual void recvFunctionalSnoop(PacketPtr pkt);
+        virtual bool recvFunctionalSnoop(PacketPtr pkt);
 
         virtual bool recvTimingResp(PacketPtr pkt);
 

@@ -306,10 +306,11 @@ class RequestPort: public Port, public AtomicRequestProtocol,
         return 0;
     }
 
-    void
+    bool
     recvFunctionalSnoop(PacketPtr pkt) override
     {
         panic("%s was not expecting a functional snoop request\n", name());
+        return true;
     }
 
     bool
@@ -426,11 +427,15 @@ class ResponsePort : public Port, public AtomicResponseProtocol,
      *
      * @param pkt Snoop packet to send.
      */
-    void
+    bool
     sendFunctionalSnoop(PacketPtr pkt) const
     {
         try {
-            FunctionalResponseProtocol::sendSnoop(_requestPort, pkt);
+            _requestPort->removeTrace(pkt);
+            bool succ = FunctionalResponseProtocol::sendSnoop(_requestPort, pkt);
+            if (!succ)
+              _requestPort->addTrace(pkt);
+            return succ;
         } catch (UnboundPortException) {
             reportUnbound();
         }

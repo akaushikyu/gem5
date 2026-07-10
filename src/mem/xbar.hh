@@ -149,6 +149,8 @@ class BaseXBar : public ClockedObject
          */
         void failedTiming(SrcType* src_port, Tick busy_time);
 
+        void failedSnoop(Tick busy_time);
+
         void occupyLayer(Tick until);
 
         /**

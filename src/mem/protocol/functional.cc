@@ -63,7 +63,7 @@ FunctionalRequestProtocol::sendMemBackdoorReq(
 
 /* The response protocol. */
 
-void
+bool
 FunctionalResponseProtocol::sendSnoop(
         FunctionalRequestProtocol *peer, PacketPtr pkt) const
 {

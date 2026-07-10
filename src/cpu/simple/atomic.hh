@@ -154,7 +154,7 @@ class AtomicSimpleCPU : public BaseSimpleCPU
         BaseSimpleCPU *cpu;
 
         virtual Tick recvAtomicSnoop(PacketPtr pkt);
-        virtual void recvFunctionalSnoop(PacketPtr pkt);
+        virtual bool recvFunctionalSnoop(PacketPtr pkt);
     };
 
 

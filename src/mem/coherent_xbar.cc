@@ -216,12 +216,29 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
             }
         }
 
-
         // the packet is a memory-mapped request and should be
         // broadcasted to our snoopers but the source
         if (snoopFilter) {
+
+            // Before doing operations on the snoop filter, first check if the snoop
+            // can be entertained by the cpu. If the cpu is doing an active LL/SC, then
+            // the snoop will not be permitted until it has finished the LL/SC or
+            // marked itself available for entertaining snoops through the LLSCTracker
+            // structure
+            auto sf_res_all = snoopFilter->functionalLookupRequest(pkt, *src_port);
+            bool snoopAccept = trySnoop(pkt, cpu_side_port_id, sf_res_all.first);
+            DPRINTF(CoherentXBar, "SNOOP TARGETS FOUND for pkt %s\n", pkt->print());
+              if (!snoopAccept) {
+                // A call to try timing will push the req layer in the waitingForLayer vector
+                reqLayers[mem_side_port_id]->tryTiming(src_port);
+                reqLayers[mem_side_port_id]->failedSnoop(clockEdge(Cycles(1)));
+                return false;
+              }
+
+            // If we are here, that means no active LLSC blocking snooping
             // check with the snoop filter where to forward this packet
             auto sf_res = snoopFilter->lookupRequest(pkt, *src_port);
+
             // the time required by a packet to be delivered through
             // the xbar has to be charged also with to lookup latency
             // of the snoop filter
@@ -696,8 +713,31 @@ CoherentXBar::recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id)
     return true;
 }
 
+bool
+CoherentXBar::trySnoop(PacketPtr pkt, PortID exclude_cpu_side_port_id,
+                       const std::vector<QueuedResponsePort*>& dests)
+{
+  DPRINTF(CoherentXBar, " %s for %s \n", __func__, pkt->print());
+  // set dummy snoop check
+  pkt->isDummySnoopCheck = true;
+  for (const auto& p: dests) {
+    if (exclude_cpu_side_port_id == InvalidPortID ||
+        p->getId() != exclude_cpu_side_port_id) {
+        bool snoopAccept = p->sendFunctionalSnoop(pkt);
+        if (!snoopAccept) {
+          // unset dummy snoop check
+          pkt->isDummySnoopCheck = false;
+          return false;
+        }
+    }
+  }
+  // unset dummy snoop check
+  pkt->isDummySnoopCheck = false;
+  return true;
+}
 
-void
+
+bool
 CoherentXBar::forwardTiming(PacketPtr pkt, PortID exclude_cpu_side_port_id,
                            const std::vector<QueuedResponsePort*>& dests)
 {
@@ -723,6 +763,7 @@ CoherentXBar::forwardTiming(PacketPtr pkt, PortID exclude_cpu_side_port_id,
 
     // Stats for fanout of this forward operation
     snoopFanout.sample(fanout);
+    return true;
 }
 
 void
@@ -1042,7 +1083,7 @@ CoherentXBar::recvFunctional(PacketPtr pkt, PortID cpu_side_port_id)
     }
 }
 
-void
+bool
 CoherentXBar::recvFunctionalSnoop(PacketPtr pkt, PortID mem_side_port_id)
 {
     if (!pkt->isPrint()) {
@@ -1055,12 +1096,13 @@ CoherentXBar::recvFunctionalSnoop(PacketPtr pkt, PortID mem_side_port_id)
         if (p->trySatisfyFunctional(pkt)) {
             if (pkt->needsResponse())
                 pkt->makeResponse();
-            return;
+            return true;
         }
     }
 
     // forward to all snoopers
     forwardFunctional(pkt, InvalidPortID);
+    return true;
 }
 
 void

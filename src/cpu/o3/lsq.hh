@@ -100,10 +100,11 @@ class LSQ
         virtual bool recvTimingResp(PacketPtr pkt);
         virtual bool recvTimingSnoopReq(PacketPtr pkt);
 
-        virtual void
+        virtual bool
         recvFunctionalSnoop(PacketPtr pkt)
         {
             // @todo: Is there a need for potential invalidation here?
+          return true;
         }
 
         /** Handles doing a retry of the previous send. */

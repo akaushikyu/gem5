@@ -1297,7 +1297,7 @@ TimingSimpleCPU::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
     return true;
 }
 
-void
+bool
 TimingSimpleCPU::DcachePort::recvFunctionalSnoop(PacketPtr pkt)
 {
     for (ThreadID tid = 0; tid < cpu->numThreads; tid++) {
@@ -1305,6 +1305,7 @@ TimingSimpleCPU::DcachePort::recvFunctionalSnoop(PacketPtr pkt)
             cpu->wakeup(tid);
         }
     }
+    return true;
 }
 
 bool

@@ -96,7 +96,7 @@ MemCheckerMonitor::recvFunctional(PacketPtr pkt)
             addr, size);
 }
 
-void
+bool
 MemCheckerMonitor::recvFunctionalSnoop(PacketPtr pkt)
 {
     Addr addr = pkt->getAddr();
@@ -110,6 +110,7 @@ MemCheckerMonitor::recvFunctionalSnoop(PacketPtr pkt)
     DPRINTF(MemCheckerMonitor,
             "Received functional snoop: addr = %#llx, size = %d\n",
             addr, size);
+    return true;
 }
 
 Tick

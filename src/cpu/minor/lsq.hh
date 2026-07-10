@@ -114,7 +114,7 @@ class LSQ : public Named
         bool recvTimingSnoopReq(PacketPtr pkt) override
         { return lsq.recvTimingSnoopReq(pkt); }
 
-        void recvFunctionalSnoop(PacketPtr pkt) override { }
+        bool recvFunctionalSnoop(PacketPtr pkt) override { return true; }
     };
 
     DcachePort dcachePort;

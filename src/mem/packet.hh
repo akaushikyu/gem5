@@ -413,6 +413,9 @@ class Packet : public Printable, public Extensible<Packet>
     // Completed cycle
     Cycles completeCycle;
 
+    // dummy snoop check
+    bool isDummySnoopCheck = false;
+
   private:
    /**
     * A pointer to the data being transferred. It can be different

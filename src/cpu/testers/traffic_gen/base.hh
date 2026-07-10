@@ -142,9 +142,9 @@ class BaseTrafficGen : public ClockedObject
         bool recvTimingResp(PacketPtr pkt)
         { return trafficGen.recvTimingResp(pkt); }
 
-        bool recvTimingSnoopReq(PacketPtr pkt) { }
+        bool recvTimingSnoopReq(PacketPtr pkt) { return true; }
 
-        void recvFunctionalSnoop(PacketPtr pkt) { }
+        bool recvFunctionalSnoop(PacketPtr pkt) { return true; }
 
         Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
 

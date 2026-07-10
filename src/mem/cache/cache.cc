@@ -167,8 +167,11 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     }
 
     if (pkt->isLL()) {
-      llscTrack.setupTracker(pkt->getAddr(), curCycle());
+      DPRINTF(Cache, "Setup LLSC tracker for addr: %x %x, cycle %x\n", \
+          pkt->getAddr(), pkt->getBlockAddr(blkSize), curCycle());
+      llscTrack.setupTracker(pkt->getBlockAddr(blkSize), curCycle());
     } else if (pkt->isSC()) {
+      DPRINTF(Cache, "Removing LLSC tracker for addr %x\n", pkt->getAddr());
       llscTrack.unsetActive();
     }
 
@@ -1275,13 +1278,6 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
     // no need to snoop requests that are not in range
     if (!inRange(pkt->getAddr())) {
         return true;
-    }
-
-    if (llscTrack.getActive() && llscTrack.getLLSCAddr() == pkt->getAddr()) {
-      // [ANIRUDH] Snoop is active, return false and try again
-      // [ANIRUDH] TODO: Need to check the address of the snoop
-      DPRINTF(Cache, "NOT DOING SNOOP AS LL IS ACTIVE for %s\n", pkt->print());
-      return false;
     }
 
     bool is_secure = pkt->isSecure();

@@ -64,6 +64,16 @@ SnoopFilter::eraseIfNullEntry(SnoopFilterCache::iterator& sf_it)
 }
 
 std::pair<SnoopFilter::SnoopList, Cycles>
+SnoopFilter::functionalLookupRequest(const Packet* cpkt, const ResponsePort&
+                           cpu_side_port)
+{
+    DPRINTF(SnoopFilter, "%s: src %s packet %s\n", __func__,
+            cpu_side_port.name(), cpkt->print());
+
+    return snoopAll(lookupLatency);
+}
+
+std::pair<SnoopFilter::SnoopList, Cycles>
 SnoopFilter::lookupRequest(const Packet* cpkt, const ResponsePort&
                            cpu_side_port)
 {

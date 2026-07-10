@@ -202,7 +202,7 @@ class SysBridge : public SimObject
             sourcePort->sendRetrySnoopResp();
         }
 
-        void
+        bool
         recvFunctionalSnoop(PacketPtr pkt) override
         {
             DPRINTF(SysBridge, "recvFunctionalSnoop incoming ID %d.\n",
@@ -214,7 +214,9 @@ class SysBridge : public SimObject
             restoreReqID(pkt, data);
             DPRINTF(SysBridge, "recvFunctionalSnoop restored ID %d.\n",
                     pkt->requestorId());
+            return true;
         }
+
     };
 
     class SysBridgeSourcePort : public ResponsePort, public BridgingPort

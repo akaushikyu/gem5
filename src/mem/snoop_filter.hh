@@ -142,6 +142,16 @@ class SnoopFilter : public SimObject
     std::pair<SnoopList, Cycles> lookupRequest(const Packet* cpkt,
                                         const ResponsePort& cpu_side_port);
 
+
+    /* This is a **soft** version of the lookup request function
+    * in the snoop filter. This does not modify the residency of the cache
+    * block in the snoop filter. It just returns to snoop all the cpu side
+    * ports..
+    * [TODO] We could be clever regarding which ports to snoop...
+    */
+    std::pair<SnoopList, Cycles> functionalLookupRequest(const Packet* cpkt,
+                                        const ResponsePort& cpu_side_port);
+
     /**
      * For an un-successful request, revert the change to the snoop
      * filter. Also take care of erasing any null entries. This method

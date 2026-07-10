@@ -94,12 +94,13 @@ class PortProxy : FunctionalRequestProtocol
     /** Granularity of any transactions issued through this proxy. */
     const Addr _cacheLineSize;
 
-    void
+    bool
     recvFunctionalSnoop(PacketPtr pkt) override
     {
         // Since port proxies aren't anyone else's peer, they should never
         // receive snoops.
         panic("Port proxies should never receive snoops.");
+        return true;
     }
 
   public:

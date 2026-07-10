@@ -95,10 +95,10 @@ CommMonitor::recvFunctional(PacketPtr pkt)
     memSidePort.sendFunctional(pkt);
 }
 
-void
+bool
 CommMonitor::recvFunctionalSnoop(PacketPtr pkt)
 {
-    cpuSidePort.sendFunctionalSnoop(pkt);
+    return cpuSidePort.sendFunctionalSnoop(pkt);
 }
 
 CommMonitor::MonitorStats::MonitorStats(statistics::Group *parent,
