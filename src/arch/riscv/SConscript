@@ -46,6 +46,8 @@ Import('*')
 
 if env['CONF']['USE_RISCV_ISA']:
     env.TagImplies('riscv isa', 'gem5 lib')
+    if env['CONF']['USE_SF']:
+      env.Append(CPPDEFINES=['STARVATION_FREEDOM'])
 
 Source('decoder.cc', tags='riscv isa')
 Source('faults.cc', tags='riscv isa')

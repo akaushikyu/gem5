@@ -243,6 +243,17 @@ class SnoopFilter : public SimObject
     {
         return std::make_pair(cpuSidePorts, latency);
     }
+
+    std::pair<SnoopList, Cycles> snoopAllExcept(Cycles latency, SnoopMask req_port) const
+    {
+      SnoopMask allButReq;
+      for (const auto& port : cpuSidePorts) {
+        allButReq |= portToMask(*port);
+      }
+      allButReq = allButReq & ~req_port;
+      return std::make_pair(maskToPortList(allButReq), latency);
+    }
+
     std::pair<SnoopList, Cycles> snoopSelected(const SnoopList&
                                 _cpu_side_ports, Cycles latency) const
     {

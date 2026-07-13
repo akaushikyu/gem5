@@ -228,6 +228,14 @@ BaseCache::inRange(Addr addr) const
 void
 BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
 {
+#if defined (STARVATION_FREEDOM)
+    if (pkt->isLL()) {
+      DPRINTF(Cache, "%s Setup LLSC tracker for addr: %x %x, cycle %d\n", \
+          __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize), curCycle());
+      llscTrack.setLLCycle(curCycle());
+      llscTrack.setStateToLLRespRecvd();
+    }
+#endif
 
     // handle special cases for LockedRMW transactions
     if (pkt->isLockedRMW()) {
@@ -494,6 +502,24 @@ BaseCache::recvTimingResp(PacketPtr pkt)
 {
     assert(pkt->isResponse());
 
+#if defined (STARVATION_FREEDOM)
+    DPRINTF(Cache, "RECEIVING TIMING RESPONSE\n");
+    if (pkt->isLLResp() ||
+        llscTrack.getLLSCAddr() == pkt->getBlockAddr(blkSize)) {
+      /* A LoadLockedReq may get converted to a ReadExReq by the Cache/MSHR
+      * By default, LoadLockedReq are not marked as sent by cache and hence,
+      * the conversion from LoadLockedReq to ReadExReq is done by the MSHR/Cache
+      * to get a cache block data. In Access, we update the LLSC tracker to
+      * record the address of the LoadLocked. Here, we can compare the pkt->addr
+      * with the llscTracker.getLLAddr() and on match to setupTracker
+      */
+      DPRINTF(Cache, " %s Setup LLSC tracker for addr: %x %x, cycle %d\n", \
+          __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize), curCycle());
+      llscTrack.setLLCycle(curCycle());
+      llscTrack.setStateToLLRespRecvd();
+    }
+#endif
+
     // all header delay should be paid for by the crossbar, unless
     // this is a prefetch response from above
     panic_if(pkt->headerDelay != 0 && pkt->cmd != MemCmd::HardPFResp,
@@ -589,6 +615,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
     }
 
     serviceMSHRTargets(mshr, pkt, blk);
+    DPRINTF(Cache, "Done with serviceMSHRTargets for pkt: %s, blk: %s\n", pkt->print(), blk->print());
     // We are stopping servicing targets early for the Locked RMW Read until
     // the write comes.
     if (!mshr->hasLockedRMWReadTarget()) {
@@ -605,6 +632,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
             // check the isFull condition before and after as we might
             // have been using the reserved entries already
             const bool was_full = mshrQueue.isFull();
+            DPRINTF(Cache, "Calling mshrQueue.deallocate\n");
             mshrQueue.deallocate(mshr);
             if (was_full && !mshrQueue.isFull()) {
                 clearBlocked(Blocked_NoMSHRs);
@@ -622,6 +650,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
 
         // if we used temp block, check to see if its valid and then clear it
         if (blk == tempBlock && tempBlock->isValid()) {
+            DPRINTF(Cache, "%s calling evict block\n", __func__);
             evictBlock(blk, writebacks);
         }
     }
@@ -1489,7 +1518,17 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
 
         satisfyRequest(pkt, blk);
         maintainClusivity(pkt->fromCache(), blk);
-
+#if defined (STARVATION_FREEDOM)
+        if (pkt->isLL()) {
+          DPRINTF(Cache, "%s: Tracking LL the address: %x %x\n", \
+            __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
+          llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+          llscTrack.setStateToLLDispatch();
+        } else if (pkt->isSC()) {
+          DPRINTF(Cache, "%s: Setting llsctrack to sc dispatch state %x\n", __func__, pkt->getAddr());
+          llscTrack.setStateToSCDispatch();
+        }
+#endif
         return true;
     }
 
@@ -1499,6 +1538,9 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     incMissCount(pkt);
 
     lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency);
+
+    // [ANIRUDH] TODO: Add an assert that under starvation freedom, a SC will never
+    // be a miss
 
     if (!blk && pkt->isLLSC() && pkt->isWrite()) {
         // complete miss on store conditional... just give up now
@@ -1700,6 +1742,7 @@ BaseCache::invalidateBlock(CacheBlk *blk)
 void
 BaseCache::evictBlock(CacheBlk *blk, PacketList &writebacks)
 {
+    DPRINTF(Cache, "Evicting block\n");
     PacketPtr pkt = evictBlock(blk);
     if (pkt) {
         writebacks.push_back(pkt);
@@ -1919,6 +1962,15 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
     // MSHR request, proceed to get the packet to send downstream
     PacketPtr pkt = createMissPacket(tgt_pkt, blk, mshr->needsWritable(),
                                      mshr->isWholeLineWrite());
+#if defined (STARVATION_FREEDOM)
+    // This is a cache miss and the MSHR is created
+    if (tgt_pkt->isLL()) {
+      DPRINTF(Cache, "%s: Tracking the address: %x %x\n", \
+          __func__, tgt_pkt->getAddr(), tgt_pkt->getBlockAddr(blkSize));
+      llscTrack.recordLLAddr(tgt_pkt->getBlockAddr(blkSize));
+      llscTrack.setStateToLLDispatch();
+    }
+#endif
 
     mshr->isForward = (pkt == nullptr);
 
@@ -2664,13 +2716,15 @@ BaseCache::MemSidePort::recvFunctionalSnoop(PacketPtr pkt)
     assert(!cache->system->bypassCaches());
 
  #if defined (STARVATION_FREEDOM)
-    if (cache->llscTrack.getActive()) {
+    if (cache->llscTrack.isActive()) {
       DPRINTF(Cache, "Receiving snoop request when LLSC is active on %x, checking \
           against incoming packet addr %x \n", cache->llscTrack.getLLSCAddr(), pkt->getAddr());
       if (cache->llscTrack.getLLSCAddr() == pkt->getAddr()) {
         DPRINTF(Cache, "Not doing snoop as LL is active for %x\n", pkt->getAddr());
         return false;
       }
+    } else {
+      DPRINTF(Cache, "LLSCTrack is not active\n");
     }
 
     if (pkt->isDummySnoopCheck) {

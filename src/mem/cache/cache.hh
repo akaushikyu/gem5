@@ -122,6 +122,10 @@ class Cache : public BaseCache
     void doTimingSupplyResponse(PacketPtr req_pkt, const uint8_t *blk_data,
                                 bool already_copied, bool pending_inval);
 
+#if defined (STARVATION_FREEDOM)
+    void servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk);
+#endif
+
     /**
      * Perform an upward snoop if needed, and update the block state
      * (possibly invalidating the block). Also create a response if required.

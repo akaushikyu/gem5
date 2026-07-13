@@ -153,11 +153,13 @@ MemCmd::commandInfo[] =
             ReadResp, "ReadSharedReq" },
     /* LoadLockedReq: note that we use plain ReadResp as response, so that
      *                we can also use ReadRespWithInvalidate when needed */
-    { {IsRead, NeedsWritable, IsLlsc, IsRequest, NeedsResponse},
-            ReadResp, "LoadLockedReq" },
+    { {IsRead, NeedsWritable, IsLlsc, IsRequest, IsInvalidate, NeedsResponse},
+            LoadLockedResp, "LoadLockedReq" },
+    /* LoadLockedResp - Read issued by a load locked */
+    { {IsRead, IsResponse, HasData}, InvalidCmd, "LoadLockedResp" },
     /* StoreCondReq */
     { {IsWrite, NeedsWritable, IsLlsc,
-           IsRequest, NeedsResponse, HasData},
+           IsRequest, IsInvalidate, NeedsResponse, HasData, FromCache},
             StoreCondResp, "StoreCondReq" },
     /* StoreCondFailReq: generates failing StoreCondResp */
     { {IsWrite, NeedsWritable, IsLlsc, IsRequest, NeedsResponse, HasData},

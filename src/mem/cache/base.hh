@@ -993,7 +993,14 @@ class BaseCache : public ClockedObject
 
 #if defined (STARVATION_FREEDOM)
     struct LLSCTracker {
-      bool LLActive = false;
+      enum State {
+        INIT = 0,
+        LL_DISPATCH,
+        LL_RESP_RECVD,
+        SC_DISPATCH,
+        SC_COMPLETE,
+        NUM_STATES
+      };
       // Address of LL/SC
       Addr addr;
       // Cycle when LL was observed
@@ -1002,30 +1009,85 @@ class BaseCache : public ClockedObject
       // TODO: Other execution environments
       // IBE -- Instruction based environment
       // CBE -- Counter based environment
+      State state;
 
-      bool getActive() { return LLActive; }
-      Cycles getLLCycle() { return LLCycle; }
-      Addr getLLSCAddr() { return addr; }
-      void unsetActive() { LLActive = false; }
+      bool isActiveOtherReqPending;
+      std::vector<PacketPtr> pendingSnoopList;
+      PacketPtr pendingPkt;
 
-      void checkAndUnset_TBE(Cycles currCycle, uint64_t tbeCycleLimit) {
-        if (!LLActive)
-          return;
+      LLSCTracker()
+        :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT),
+        isActiveOtherReqPending(false), pendingPkt(NULL) { }
+
+      std::string stringifyState(State state) {
+        switch(state) {
+          case State::INIT:
+            return "LLSCTracker::State::Init";
+          case State::LL_DISPATCH:
+            return "LLSCTracker::State::LL_DISPATCH (LL dispatched)";
+          case State::LL_RESP_RECVD:
+            return "LLSCTracker::State::LL_RESP_RECVD (LL responses received)";
+          case State::SC_DISPATCH:
+            return "LLSCTracker::State::SC_DISPATCH (SC dispatched)";
+          case State::SC_COMPLETE:
+            return "LLSCTracker::State::SC_COMPLETE (SC complete)";
+          default:
+            return "Invalid state";
+        }
+      }
+
+      std::string getLLStateString() { return stringifyState(state); }
+      void setStateToLLDispatch() { state = State::LL_DISPATCH; }
+      void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
+      void setStateToSCDispatch() { state = State::SC_DISPATCH; }
+      void setStateToSCComplete() { state = State::SC_COMPLETE; }
+      void resetState() { state = State::INIT; }
+      void markNoPendingReq() { isActiveOtherReqPending = false; }
+      bool markPendingReq(PacketPtr pending) {
+        if (!isActiveOtherReqPending) {
+          pendingPkt = new Packet(pending, false, true);
+          isActiveOtherReqPending = true;
+          return true;
+        }
+        // This means the core has already observed another core's
+        // request and some other core will be responsible for
+        // sending to this requestor
+        return false;
+      }
+
+      bool checkAndReset_TBE(Cycles currCycle, uint64_t tbeCycleLimit) {
+        if (!isActive())
+          return false;
         // if there is an active LL, check the current tick
         // and determine whether to unset the active LL and allow
         // for snoops
         // TODO: Make TBE cycle count a command line parameter
         if (currCycle - LLCycle > Cycles(tbeCycleLimit)) {
-          unsetActive();
+          resetState();
+          return true;
         }
+        return false;
       }
 
-      void setupTracker(Addr _addr, Cycles _curCycle) {
-        LLActive = true;
-        addr = _addr;
-        LLCycle= _curCycle;
+      void setLLCycle(Cycles _curCycle) {
+        LLCycle = _curCycle;
       }
+
+      void recordLLAddr(Addr _addr) {
+        addr = _addr;
+      }
+
+      bool isActivePending() { return isActiveOtherReqPending; }
+      bool isActive() { return (state == State::LL_DISPATCH ||
+                                state == State::LL_RESP_RECVD ||
+                                state == State::SC_DISPATCH); }
+      Cycles getLLCycle() { return LLCycle; }
+      Addr getLLSCAddr() { return addr; }
+      bool isLLSCActiveWithData() { return (state == State::LL_RESP_RECVD ||
+                                            state == State::SC_DISPATCH); }
+      PacketPtr getPendingPkt() { return pendingPkt; }
     };
+ 
 
     LLSCTracker llscTrack;
 #endif

@@ -928,8 +928,15 @@ ISA::handleLockedSnoop(PacketPtr pkt, Addr cacheBlockMask)
     if (load_reservation_addr == INVALID_RESERVATION_ADDR)
         return;
     Addr snoop_addr = pkt->getAddr() & cacheBlockMask;
+    DPRINTF(LLSC, "Pkt is LLSCActiveSnoop %s\n", pkt->isLLSCActiveSnoop);
     DPRINTF(LLSC, "Locked snoop on address %x.\n", snoop_addr);
-    if ((load_reservation_addr & cacheBlockMask) == snoop_addr)
+    if ((load_reservation_addr & cacheBlockMask) == snoop_addr
+#if defined (STARVATION_FREEDOM)
+         // do not modify the reservation address state if this is
+         // an active snoop
+         && !pkt->isLLSCActiveSnoop
+#endif
+        )
         load_reservation_addr = INVALID_RESERVATION_ADDR;
 }
 

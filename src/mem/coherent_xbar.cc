@@ -219,6 +219,7 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
         // the packet is a memory-mapped request and should be
         // broadcasted to our snoopers but the source
         if (snoopFilter) {
+          /*
 #if defined (STARVATION_FREEDOM)
             // Before doing operations on the snoop filter, first check if the snoop
             // can be entertained by the cpu. If the cpu is doing an active LL/SC, then
@@ -226,16 +227,23 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
             // marked itself available for entertaining snoops through the LLSCTracker
             // structure
             auto sf_res_all = snoopFilter->functionalLookupRequest(pkt, *src_port);
+            // [ANIRUDH] This is problematic...
+            // Consider the following scenario, c0, c1, c2. C0 does the LL and SC
+            // while C1 and C2 are pending with LLs. Now, C1's snoop is denied by
+            // C0 because it had an active LLSC. However, after it finished its SC,
+            // C1's snoop continues to be denied because C2 says I have an active LL,
+            // but that's not true because it has not yet received its data response...
+
             bool snoopAccept = trySnoop(pkt, cpu_side_port_id, sf_res_all.first);
             DPRINTF(CoherentXBar, "SNOOP TARGETS FOUND for pkt %s\n", pkt->print());
-              if (!snoopAccept) {
-                // A call to try timing will push the req layer in the waitingForLayer vector
-                reqLayers[mem_side_port_id]->tryTiming(src_port);
-                reqLayers[mem_side_port_id]->failedSnoop(clockEdge(Cycles(1)));
-                return false;
-              }
-            // If we are here, that means no active LLSC blocking snooping
+            if (!snoopAccept) {
+              // A call to try timing will push the req layer in the waitingForLayer vector
+              reqLayers[mem_side_port_id]->tryTiming(src_port);
+              reqLayers[mem_side_port_id]->failedSnoop(clockEdge(Cycles(1)));
+              return false;
+            }
 #endif
+            */
             // check with the snoop filter where to forward this packet
             auto sf_res = snoopFilter->lookupRequest(pkt, *src_port);
 
@@ -290,6 +298,7 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
         // determine if we are forwarding the packet, or responding to
         // it
         if (forwardPacket(pkt)) {
+            DPRINTF(CoherentXBar, "Forwarding packet %s\n", pkt->print());
             // if we are passing on, rather than sinking, a packet to
             // which an upstream cache has committed to responding,
             // the line was needs writable, and the responding only
@@ -306,9 +315,11 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
                 pkt->clearWriteThrough();
             }
 
+            DPRINTF(CoherentXBar, "Sending timing request to memSidePort %s\n", pkt->print());
             // since it is a normal request, attempt to send the packet
             success = memSidePorts[mem_side_port_id]->sendTimingReq(pkt);
         } else {
+            DPRINTF(CoherentXBar, "Not forwarding packet %s\n", pkt->print());
             // no need to forward, turn this packet around and respond
             // directly
             assert(pkt->needsResponse());
@@ -600,8 +611,12 @@ CoherentXBar::recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id)
     // created as the result of a normal request (in which case it
     // should be in the outstandingSnoop), or if we merely forwarded
     // someone else's snoop request
-    const bool forwardAsSnoop = outstandingSnoop.find(pkt->req) ==
-        outstandingSnoop.end();
+    const bool forwardAsSnoop = (outstandingSnoop.find(pkt->req) ==
+        outstandingSnoop.end())
+#if defined (STARVATION_FREEDOM)
+        && !pkt->isRetrySnoop
+#endif
+        ;
 
     // test if the crossbar should be considered occupied for the
     // current port, note that the check is bypassed if the response
@@ -1156,12 +1171,14 @@ CoherentXBar::sinkPacket(const PacketPtr pkt) const
 bool
 CoherentXBar::forwardPacket(const PacketPtr pkt)
 {
+    DPRINTF(CoherentXBar, "%s: packet %s\n", __func__, pkt->print());
     // we are forwarding the packet if:
     // 1) this is a cache clean request to the PoU/PoC and this
     //    crossbar is above the PoU/PoC
     // 2) this is a read or a write
     // 3) this crossbar is above the point of coherency
     if (pkt->isClean()) {
+        DPRINTF(CoherentXBar, "Pkt is clean\n");
         return !isDestination(pkt);
     }
     return pkt->isRead() || pkt->isWrite() || !pointOfCoherency;

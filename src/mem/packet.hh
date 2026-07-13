@@ -110,6 +110,7 @@ class MemCmd
         ReadCleanReq,
         ReadSharedReq,
         LoadLockedReq,
+        LoadLockedResp,
         StoreCondReq,
         StoreCondFailReq,       // Failed StoreCondReq in MSHR (never sent)
         StoreCondResp,
@@ -415,6 +416,10 @@ class Packet : public Printable, public Extensible<Packet>
 #if defined (STARVATION_FREEDOM)
     // dummy snoop check
     bool isDummySnoopCheck = false;
+
+    bool isRetrySnoop = false;
+
+    bool isLLSCActiveSnoop = false;
 #endif
 
   private:
@@ -1486,6 +1491,11 @@ class Packet : public Printable, public Extensible<Packet>
     bool
     isLL() const {
       return cmd == MemCmd::LoadLockedReq;
+    }
+
+    bool
+    isLLResp() const {
+      return cmd == MemCmd::LoadLockedResp;
     }
 
     /**

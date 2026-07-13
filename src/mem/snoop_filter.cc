@@ -70,8 +70,7 @@ SnoopFilter::functionalLookupRequest(const Packet* cpkt, const ResponsePort&
 {
     DPRINTF(SnoopFilter, "%s: src %s packet %s\n", __func__,
             cpu_side_port.name(), cpkt->print());
-
-    return snoopAll(lookupLatency);
+    return snoopAllExcept(lookupLatency, portToMask(cpu_side_port));
 }
 #endif
 
@@ -85,6 +84,7 @@ SnoopFilter::lookupRequest(const Packet* cpkt, const ResponsePort&
     // check if the packet came from a cache
     bool allocate = !cpkt->req->isUncacheable() && cpu_side_port.isSnooping()
         && cpkt->fromCache();
+    DPRINTF(SnoopFilter, "%s: allocate flag: %d %d %d %d\n", __func__, allocate, cpkt->req->isUncacheable(), cpu_side_port.isSnooping(), cpkt->fromCache());
     Addr line_addr = cpkt->getBlockAddr(linesize);
     if (cpkt->isSecure()) {
         line_addr |= LineSecure;

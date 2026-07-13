@@ -149,6 +149,23 @@ Cache::satisfyRequest(PacketPtr pkt, CacheBlk *blk,
             }
         }
     }
+#if defined (STARVATION_FREEDOM)
+    if (pkt->isSC()) {
+      DPRINTF(Cache, "Marking SC as complete %s\n", pkt->print());
+      llscTrack.setStateToSCComplete();
+      // Once the SC has completed, check if anyone is pending....
+      if (llscTrack.isActivePending()) {
+        assert(llscTrack.getPendingPkt() != NULL);
+        PacketPtr pendingPkt(llscTrack.getPendingPkt());
+        DPRINTF(Cache, "SC done and there is an active pending request %x\n", pendingPkt->print());
+        DPRINTF(Cache, "Servicing pending snoop request\n");
+        CacheBlk* blk = tags->findBlock({pendingPkt->getAddr(), false});
+        pendingPkt->isRetrySnoop = true;
+        servicePendingSnoopRequest(pendingPkt, blk);
+        llscTrack.markNoPendingReq();
+      }
+    }
+#endif
 }
 
 /////////////////////////////////////////////////////
@@ -161,20 +178,25 @@ bool
 Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
               PacketList &writebacks)
 {
-
 #if defined (STARVATION_FREEDOM)
-    if (llscTrack.getActive()) {
+    if (llscTrack.isActive()) {
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
-      llscTrack.checkAndUnset_TBE(curCycle(), system->getTBECycleLimit());
-    }
-
-    if (pkt->isLL()) {
-      DPRINTF(Cache, "Setup LLSC tracker for addr: %x %x, cycle %x\n", \
-          pkt->getAddr(), pkt->getBlockAddr(blkSize), curCycle());
-      llscTrack.setupTracker(pkt->getBlockAddr(blkSize), curCycle());
-    } else if (pkt->isSC()) {
-      DPRINTF(Cache, "Removing LLSC tracker for addr %x\n", pkt->getAddr());
-      llscTrack.unsetActive();
+      DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
+      bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
+      if (reset) {
+        DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
+      }
+      /* [TODO] Need to add this...
+      if (llscTrack.isActivePending()) {
+        assert(llscTrack.getPendingPkt() != NULL);
+        PacketPtr pendingPkt(llscTrack.getPendingPkt());
+        DPRINTF(Cache, "SC done and there is an active pending request %x\n", pendingPkt->print());
+        DPRINTF(Cache, "Servicing pending snoop request\n");
+        CacheBlk* blk = tags->findBlock({pendingPkt->getAddr(), false});
+        ,servicePendingSnoopRequest(pendingPkt, blk);
+        llscTrack.markNoPendingReq();
+      }
+      */
     }
 #endif
 
@@ -747,6 +769,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
         Packet *tgt_pkt = target.pkt;
         switch (target.source) {
           case MSHR::Target::FromCPU:
+            DPRINTF(Cache, "%s case mshr::target::fromCPU\n", __func__);
             from_core = true;
 
             Tick completion_time;
@@ -922,6 +945,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
             break;
 
           case MSHR::Target::FromPrefetcher:
+            DPRINTF(Cache, "%s case mshr::target::fromPrefetcher\n", __func__);
             assert(tgt_pkt->cmd == MemCmd::HardPFReq);
             from_pref = true;
 
@@ -929,6 +953,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
             break;
 
           case MSHR::Target::FromSnoop:
+            DPRINTF(Cache, "%s case mshr::target::fromSnoop\n", __func__);
             // I don't believe that a snoop can be in an error state
             assert(!is_error);
             // response to snoop request
@@ -965,6 +990,21 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
             // should not invalidate the block, so check if the
             // invalidation should be discarded
             if (is_invalidate || mshr->hasPostInvalidate()) {
+                DPRINTF(Cache, "Invalidating block as is_invalidate: %s, mshr->hasPostInvalidate() %s\n", \
+                                is_invalidate, mshr->hasPostInvalidate());
+#if defined (STARVATION_FREEDOM)
+                if (llscTrack.isActive()) {
+                  DPRINTF(Cache, "LLSC is active on addr %x, incoming pkt addr: %x\n", \
+                                  llscTrack.getLLSCAddr(), pkt->getAddr());
+                  if (llscTrack.getLLSCAddr() == pkt->getAddr()) {
+                    // do not invalidate the block
+                    // we will anyways to this when we respond to the pending requestor
+                    DPRINTF(Cache, "Not invalidating block\n");
+                  } else {
+                    invalidateBlock(blk);
+                  }
+                } else
+#endif
                 invalidateBlock(blk);
             } else if (mshr->hasPostDowngrade()) {
                 blk->clearCoherenceBits(CacheBlk::WritableBit);
@@ -1024,12 +1064,21 @@ Cache::doTimingSupplyResponse(PacketPtr req_pkt, const uint8_t *blk_data,
     // timing-mode snoop responses require a new packet, unless we
     // already made a copy...
     PacketPtr pkt = req_pkt;
+
     if (!already_copied)
         // do not clear flags, and allocate space for data if the
         // packet needs it (the only packets that carry data are read
         // responses)
         pkt = new Packet(req_pkt, false, req_pkt->isRead());
+#if defined (STARVATION_FREEDOM)
+    if (req_pkt->isRetrySnoop) {
+      DPRINTF(Cache, "%s setting pkt to is retry snoop %s\n", __func__, pkt->print());
+      pkt->isRetrySnoop = true;
+    }
+#endif
 
+    DPRINTF(Cache, "%s: req_pkt->req->isUncacheable %s, req_pkt->isInvalidate() %s, pkt->hasSharers() %s\n", \
+                    __func__, req_pkt->req->isUncacheable(), req_pkt->isInvalidate(), pkt->hasSharers());
     assert(req_pkt->req->isUncacheable() || req_pkt->isInvalidate() ||
            pkt->hasSharers());
     pkt->makeTimingResponse();
@@ -1056,6 +1105,19 @@ Cache::doTimingSupplyResponse(PacketPtr req_pkt, const uint8_t *blk_data,
             pkt->print(), forward_time);
     memSidePort.schedTimingSnoopResp(pkt, forward_time);
 }
+
+#if defined (STARVATION_FREEDOM)
+void
+Cache::servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk) {
+  DPRINTF(CacheVerbose, "%s: for %s\n", __func__, pendingPkt->print());
+  if (!pendingPkt->cacheResponding()) {
+    pendingPkt->setCacheResponding();
+  }
+  pendingPkt->setResponderHadWritable();
+  doTimingSupplyResponse(pendingPkt, blk->data, false, false);
+  invalidateBlock(blk);
+}
+#endif
 
 uint32_t
 Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
@@ -1094,6 +1156,12 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
             // there is a snoop hit in upper levels
             Packet snoopPkt(pkt, true, true);
             snoopPkt.setExpressSnoop();
+#if defined (STARVATION_FREEDOM)
+    if (llscTrack.isActive() && llscTrack.getLLSCAddr() == pkt->getAddr()) {
+      DPRINTF(Cache, "Setting LLSCActiveSnoop for packet: %s\n", snoopPkt.print());
+      snoopPkt.isLLSCActiveSnoop = true;
+    }
+#endif
             // the snoop packet does not need to wait any additional
             // time
             snoopPkt.headerDelay = snoopPkt.payloadDelay = 0;
@@ -1184,6 +1252,30 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
         gem5_assert(!(isReadOnly && blk->isSet(CacheBlk::DirtyBit)),
             "Should never have a dirty block in a read-only cache %s\n",
             name());
+
+#if defined (STARVATION_FREEDOM)
+        if (llscTrack.isActive()) {
+          DPRINTF(Cache, "%s: LLSC active on addr %x\n", __func__, llscTrack.getLLSCAddr());
+          if (llscTrack.getLLSCAddr() == pkt->getAddr()) {
+            DPRINTF(Cache, "%s: LLSC active address and incoming packet %s address match, marking pending\n",\
+                            __func__, pkt->print());
+            // If there is a core that has received the LL response
+            // but not yet completed the SC, then do not respond
+            // to the snoop immediately. Rather, record the packet, blk
+            // and respond to the snoop once the core has moved to SC
+            // complete or reset..
+            // Mark the packet to denote that cache will respond
+
+            if (llscTrack.markPendingReq(pkt)) {
+              DPRINTF(Cache, "%s: Updated pending request in llsc tracker to %s \n", \
+                              __func__, pkt->print());
+              pkt->setCacheResponding();
+            }
+            //delete pkt;
+            return snoop_delay;
+          }
+        }
+#endif
     }
 
     // Invalidate any prefetch's from below that would strip write permissions
@@ -1277,6 +1369,18 @@ bool
 Cache::recvTimingSnoopReq(PacketPtr pkt)
 {
     DPRINTF(CacheVerbose, "%s: for %s\n", __func__, pkt->print());
+
+#if defined (STARVATION_FREEDOM)
+    if (llscTrack.isActive() && llscTrack.getLLSCAddr() == pkt->getAddr()) {
+      DPRINTF(Cache, "%s: active LLSC with address match on %x, current llscTrack state: %s\n",
+                      __func__, pkt->getAddr(), llscTrack.getLLStateString());
+      if (llscTrack.isActivePending()) {
+        DPRINTF(Cache, "%s: llsc track active pending pkt %s\n", __func__, llscTrack.getPendingPkt());
+      } else {
+        DPRINTF(Cache, "%s: llsc track no active pending pkt\n", __func__);
+      }
+    }
+#endif
 
     // no need to snoop requests that are not in range
     if (!inRange(pkt->getAddr())) {
