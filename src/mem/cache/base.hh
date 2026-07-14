@@ -1012,12 +1012,14 @@ class BaseCache : public ClockedObject
       State state;
 
       bool isActiveOtherReqPending;
-      std::vector<PacketPtr> pendingSnoopList;
+      bool isActiveExclReqPending;
+      // [ANIRUDH] Do we need pending sharer list...?
+      std::vector<PacketPtr> pendingList;
       PacketPtr pendingPkt;
 
       LLSCTracker()
         :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT),
-        isActiveOtherReqPending(false), pendingPkt(NULL) { }
+        isActiveOtherReqPending(false), isActiveExclReqPending(false), pendingPkt(NULL) { }
 
       std::string stringifyState(State state) {
         switch(state) {
@@ -1042,15 +1044,21 @@ class BaseCache : public ClockedObject
       void setStateToSCDispatch() { state = State::SC_DISPATCH; }
       void setStateToSCComplete() { state = State::SC_COMPLETE; }
       void resetState() { state = State::INIT; }
-      void markNoPendingReq() { isActiveOtherReqPending = false; }
+      void markNoPendingReq() { isActiveOtherReqPending = false; \
+                                isActiveExclReqPending = false; \
+                                pendingList.clear(); }
       bool markPendingReq(PacketPtr pending) {
-        if (!isActiveOtherReqPending) {
-          pendingPkt = new Packet(pending, false, true);
+        if (!isActiveExclReqPending) {
+          PacketPtr pp = new Packet(pending, false, true);
+          pendingList.push_back(pp);
           isActiveOtherReqPending = true;
+          if (pending->needsWritable()) {
+            isActiveExclReqPending = true;
+          }
           return true;
         }
         // This means the core has already observed another core's
-        // request and some other core will be responsible for
+        // excl request and some other core will be responsible for
         // sending to this requestor
         return false;
       }
@@ -1081,13 +1089,15 @@ class BaseCache : public ClockedObject
       bool isActive() { return (state == State::LL_DISPATCH ||
                                 state == State::LL_RESP_RECVD ||
                                 state == State::SC_DISPATCH); }
+      bool isMatchAddr(Addr incoming) { return (addr == incoming); }
       Cycles getLLCycle() { return LLCycle; }
       Addr getLLSCAddr() { return addr; }
       bool isLLSCActiveWithData() { return (state == State::LL_RESP_RECVD ||
                                             state == State::SC_DISPATCH); }
       PacketPtr getPendingPkt() { return pendingPkt; }
+      std::vector<PacketPtr>& getPendingPktList() { return pendingList; }
     };
- 
+
 
     LLSCTracker llscTrack;
 #endif

@@ -154,9 +154,7 @@ MemCmd::commandInfo[] =
     /* LoadLockedReq: note that we use plain ReadResp as response, so that
      *                we can also use ReadRespWithInvalidate when needed */
     { {IsRead, NeedsWritable, IsLlsc, IsRequest, IsInvalidate, NeedsResponse},
-            LoadLockedResp, "LoadLockedReq" },
-    /* LoadLockedResp - Read issued by a load locked */
-    { {IsRead, IsResponse, HasData}, InvalidCmd, "LoadLockedResp" },
+            ReadExResp, "LoadLockedReq" },
     /* StoreCondReq */
     { {IsWrite, NeedsWritable, IsLlsc,
            IsRequest, IsInvalidate, NeedsResponse, HasData, FromCache},

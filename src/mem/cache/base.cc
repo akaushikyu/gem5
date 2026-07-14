@@ -504,8 +504,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
 
 #if defined (STARVATION_FREEDOM)
     DPRINTF(Cache, "RECEIVING TIMING RESPONSE\n");
-    if (pkt->isLLResp() ||
-        llscTrack.getLLSCAddr() == pkt->getBlockAddr(blkSize)) {
+      if (llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
       /* A LoadLockedReq may get converted to a ReadExReq by the Cache/MSHR
       * By default, LoadLockedReq are not marked as sent by cache and hence,
       * the conversion from LoadLockedReq to ReadExReq is done by the MSHR/Cache
@@ -1524,10 +1523,13 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
             __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
           llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
           llscTrack.setStateToLLDispatch();
-        } else if (pkt->isSC()) {
+        }
+        /*
+        else if (pkt->isSC()) {
           DPRINTF(Cache, "%s: Setting llsctrack to sc dispatch state %x\n", __func__, pkt->getAddr());
           llscTrack.setStateToSCDispatch();
         }
+        */
 #endif
         return true;
     }
@@ -2719,7 +2721,7 @@ BaseCache::MemSidePort::recvFunctionalSnoop(PacketPtr pkt)
     if (cache->llscTrack.isActive()) {
       DPRINTF(Cache, "Receiving snoop request when LLSC is active on %x, checking \
           against incoming packet addr %x \n", cache->llscTrack.getLLSCAddr(), pkt->getAddr());
-      if (cache->llscTrack.getLLSCAddr() == pkt->getAddr()) {
+      if (cache->llscTrack.isMatchAddr(pkt->getAddr())) {
         DPRINTF(Cache, "Not doing snoop as LL is active for %x\n", pkt->getAddr());
         return false;
       }

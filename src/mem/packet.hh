@@ -110,7 +110,6 @@ class MemCmd
         ReadCleanReq,
         ReadSharedReq,
         LoadLockedReq,
-        LoadLockedResp,
         StoreCondReq,
         StoreCondFailReq,       // Failed StoreCondReq in MSHR (never sent)
         StoreCondResp,
@@ -1491,11 +1490,6 @@ class Packet : public Printable, public Extensible<Packet>
     bool
     isLL() const {
       return cmd == MemCmd::LoadLockedReq;
-    }
-
-    bool
-    isLLResp() const {
-      return cmd == MemCmd::LoadLockedResp;
     }
 
     /**
