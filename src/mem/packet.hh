@@ -149,6 +149,12 @@ class MemCmd
         HTMAbort,
         // Tlb shootdown
         TlbiExtSync,
+#if defined (STARVATION_FREEDOM)
+        // Request sent by core to inform
+        // cache to unblock snoop requests on
+        // active LLSC address
+        InvalidateLLSC,
+#endif
 #if defined (BESPOKE)
         // Spin lock queue commands
         EnqueueInitReq,
@@ -188,6 +194,9 @@ class MemCmd
         IsPrint,        //!< Print state matching address (for debugging)
         IsFlush,        //!< Flush the address from caches
         FromCache,      //!< Request originated from a caching agent
+#if defined (STARVATION_FREEDOM)
+        IsInvalidateLLSC,
+#endif
 #if defined (BESPOKE)
         IsEnqueueInit,
         IsEnqueueWrite,
@@ -256,6 +265,9 @@ class MemCmd
     bool isEviction() const        { return testCmdAttrib(IsEviction); }
     bool isClean() const           { return testCmdAttrib(IsClean); }
     bool fromCache() const         { return testCmdAttrib(FromCache); }
+#if defined (STARVATION_FREEDOM)
+    bool isInvalidateLLSC() const  { return testCmdAttrib(IsInvalidateLLSC); }
+#endif
 
     /**
      * A writeback is an eviction that carries data.
@@ -1491,6 +1503,12 @@ class Packet : public Printable, public Extensible<Packet>
     isLL() const {
       return cmd == MemCmd::LoadLockedReq;
     }
+#if defined (STARVATION_FREEDOM)
+    bool
+    isInvalidateLLSC() const {
+      return cmd == MemCmd::InvalidateLLSC;
+    }
+#endif
 
     /**
      * Is this packet a clean eviction, including both actual clean

@@ -178,7 +178,7 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
       bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
-      if (reset) {
+      if (reset || pkt->isInvalidateLLSC()) {
         DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
         if (llscTrack.isActivePending()) {
           DPRINTF(Cache, "%s servicing pending requests on %x\n", __func__, llscTrack.getLLSCAddr());
@@ -188,8 +188,17 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     }
 
     if (pkt->isLL()) {
+      DPRINTF(Cache, "%s: Tracking LLSC in LL issued state addr: %x\n", \
+                     __func__, pkt->getBlockAddr(blkSize));
       llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
       llscTrack.setStateToLLIssued();
+    }
+
+    if (pkt->isInvalidateLLSC()) {
+      // after doing the invalidate, reset the LLSC tracker DS
+      // and return
+      llscTrack.resetState();
+      return true;
     }
 #endif
 

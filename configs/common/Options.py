@@ -753,7 +753,7 @@ def addSEOptions(parser):
     if buildEnv["USE_RISCV_ISA"]:
         parser.add_argument("--tbe-cycle-limit",
                             type=int,
-                            default=1,
+                            default=(-1 & 0xFFFFFFFF),
         )
 
     parser.add_argument(
@@ -818,7 +818,7 @@ def addFSOptions(parser):
     if buildEnv["USE_RISCV_ISA"]:
         parser.add_argument("--tbe-cycle-limit",
                             type=int,
-                            default=1,
+                            default=(-1 & 0xFFFFFFFF),
         )
 
     if buildEnv["USE_ARM_ISA"]:

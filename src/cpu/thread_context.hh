@@ -91,6 +91,45 @@ class ThreadContext : public PCEventScope
     bool useForClone = false;
 
   public:
+#if defined (STARVATION_FREEDOM)
+    // This is the tracker for IBE and CBE
+    struct LLSCTracker {
+      Addr PC;
+      bool active;
+      unsigned commitInsnCnt;
+
+      LLSCTracker():
+        PC(Addr(0)), active(false), commitInsnCnt(0) { }
+
+      void setLLSCActive(Addr _pc) { PC = _pc; active = true; commitInsnCnt = 0; }
+      void resetLLSCActive() { active = false; /* commitInsnCnt = 0; */}
+      void incrementCommitInsnCnt() { commitInsnCnt++; }
+
+      bool isLLSCActive() { return active; }
+      unsigned returnCommitInsnCnt() { return commitInsnCnt; }
+      Addr getLLSCActivePC() { return PC; }
+    };
+
+    LLSCTracker llscTracker;
+
+    void activateLLSCTracker(Addr PC) {
+      llscTracker.setLLSCActive(PC);
+    }
+
+    void incrementCommitInsnCntForLLSCTracker() {
+      if (llscTracker.isLLSCActive()) {
+        llscTracker.incrementCommitInsnCnt();
+      }
+    }
+
+    void resetLLSCTracker() {
+      llscTracker.resetLLSCActive();
+    }
+
+    unsigned getLLSCTrackerCommitInsnObserved() {
+      return llscTracker.returnCommitInsnCnt();
+    }
+#endif
 
     bool getUseForClone() { return useForClone; }
 

@@ -1169,6 +1169,16 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         moveFromRequestsToTransfers(request);
     }
 }
+#if defined (STARVATION_FREEDOM)
+void
+LSQ::informLLSCReservationInvalidate() {
+  // [TODO]
+  RequestPtr invLLSCReq = std::make_shared<Request>();
+  PacketPtr invLLSCPkt = new Packet(invLLSCReq, MemCmd::InvalidateLLSC);
+  dcachePort.sendTimingReq(invLLSCPkt);
+  return;
+}
+#endif
 
 bool
 LSQ::tryToSend(LSQRequestPtr request)

@@ -441,6 +441,10 @@ BaseCache::recvTimingReq(PacketPtr pkt)
         // Note that lat is passed by reference here. The function
         // access() will set the lat value.
         satisfied = access(pkt, blk, lat, writebacks);
+#if defined (STARVATION_FREEDOM)
+        if (pkt->isInvalidateLLSC())
+          return;
+#endif
 
         // After the evicted blocks are selected, they must be forwarded
         // to the write buffer to ensure they logically precede anything

@@ -682,6 +682,9 @@ class LSQ : public Named
 
     /** A store has been committed, please move it to the store buffer */
     void sendStoreToStoreBuffer(LSQRequestPtr request);
+#if defined (STARVATION_FREEDOM)
+    void informLLSCReservationInvalidate();
+#endif
 
     /** Are there any accesses other than normal cached loads in the
      *  memory system or having received responses which need to be

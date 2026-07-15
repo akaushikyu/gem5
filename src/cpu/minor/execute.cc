@@ -892,6 +892,29 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
     ThreadID thread_id = inst->id.threadId;
     ThreadContext *thread = cpu.getContext(thread_id);
 
+#if defined (STARVATION_FREEDOM)
+    if (inst->staticInst->isLoadLocked()) {
+      DPRINTF(MinorExecute, "%s: Found LL instruction %s\n", __func__, *inst);
+      DPRINTF(MinorExecute, "%s: Activating LLSC tracker \n", __func__);
+      thread->activateLLSCTracker(inst->pc->instAddr());
+    } else if (inst->staticInst->isStoreConditional()) {
+      DPRINTF(MinorExecute, "%s: Found SC instruction %s\n", __func__, *inst);
+      DPRINTF(MinorExecute, "%s: Deactivating LLSC tracker %d\n", __func__, \
+            thread->getLLSCTrackerCommitInsnObserved());
+      thread->resetLLSCTracker();
+    } else {
+      DPRINTF(MinorExecute, "%s: Incrementing commit insn count for LLSC tracker %d\n", \
+                            __func__, thread->getLLSCTrackerCommitInsnObserved());
+      thread->incrementCommitInsnCntForLLSCTracker();
+      if (thread->getLLSCTrackerCommitInsnObserved() > 2) {
+        // This means that the number of committed instructions observed
+        // has gone past 16. Send a signal to the memory to unblock the LL it is holding
+        ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+        context.informLLSCReservationInvalidate();
+      }
+    }
+#endif
+
     bool completed_inst = true;
     fault = NoFault;
 
