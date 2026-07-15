@@ -1003,6 +1003,8 @@ ISA::handleLockedWrite(const RequestPtr &req, Addr cacheBlockMask)
     DPRINTF(LLSC, "[cid:%d]: SC success! Current locked addr = %x.\n",
             req->contextId(), load_reservation_addr & cacheBlockMask);
     load_reservation_addr = INVALID_RESERVATION_ADDR;
+    DPRINTF(LLSC, "%s: [cid: %d]: New load reservation address: %x\n", \
+                  __func__, req->contextId(), load_reservation_addrs[tc->contextId()]);
     return true;
 }
 

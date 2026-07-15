@@ -186,6 +186,11 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         }
       }
     }
+
+    if (pkt->isLL()) {
+      llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+      llscTrack.setStateToLLIssued();
+    }
 #endif
 
     if (pkt->req->isUncacheable()) {

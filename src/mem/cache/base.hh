@@ -995,6 +995,11 @@ class BaseCache : public ClockedObject
     struct LLSCTracker {
       enum State {
         INIT = 0,
+        // ll_issued means the core has created a ll request but
+        // not sent it out
+        LL_ISSUED,
+        // ll_dispatched means the core as sent the ll request
+        // and waiting for response
         LL_DISPATCH,
         LL_RESP_RECVD,
         SC_DISPATCH,
@@ -1025,6 +1030,8 @@ class BaseCache : public ClockedObject
         switch(state) {
           case State::INIT:
             return "LLSCTracker::State::Init";
+          case State::LL_ISSUED:
+            return "LLSCtracker::State::LL_ISSUED (LL issued but not dispatched)";
           case State::LL_DISPATCH:
             return "LLSCTracker::State::LL_DISPATCH (LL dispatched)";
           case State::LL_RESP_RECVD:
@@ -1039,6 +1046,7 @@ class BaseCache : public ClockedObject
       }
 
       std::string getLLStateString() { return stringifyState(state); }
+      void setStateToLLIssued() { state = State::LL_ISSUED; }
       void setStateToLLDispatch() { state = State::LL_DISPATCH; }
       void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
       void setStateToSCDispatch() { state = State::SC_DISPATCH; }
@@ -1086,7 +1094,8 @@ class BaseCache : public ClockedObject
       }
 
       bool isActivePending() { return isActiveOtherReqPending; }
-      bool isActive() { return (state == State::LL_DISPATCH ||
+      bool isActive() { return (state == State::LL_ISSUED ||
+                                state == State::LL_DISPATCH ||
                                 state == State::LL_RESP_RECVD ||
                                 state == State::SC_DISPATCH); }
       bool isMatchAddr(Addr incoming) { return (addr == incoming); }
