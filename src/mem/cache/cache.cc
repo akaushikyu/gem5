@@ -1150,7 +1150,9 @@ Cache::servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk, bool doIn
   if (!pendingPkt->cacheResponding()) {
     pendingPkt->setCacheResponding();
   }
-  pendingPkt->setResponderHadWritable();
+  if (!pendingPkt->responderHadWritable()) {
+    pendingPkt->setResponderHadWritable();
+  }
   if (pendingPkt->isRead() && !pendingPkt->needsWritable()) {
     DPRINTF(Cache, "%s: setting pending has sharers %s %s\n", __func__, pendingPkt->print(), pendingPkt->hasSharers());
     pendingPkt->setHasSharers();
@@ -1312,7 +1314,9 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
               DPRINTF(Cache, "%s: Updated pending request in llsc tracker to %s %d \n", \
                               __func__, pkt->print(), pkt->req->requestorId());
               DPRINTF(Cache, "%s: Blk print after marking pending: %s\n", __func__, blk->print());
-              pkt->setCacheResponding();
+              if (!pkt->cacheResponding()) {
+                pkt->setCacheResponding();
+              }
               DPRINTF(Cache, "%s: Blk print after marking pending: %s\n", __func__, blk->print());
             }
             //delete pkt;

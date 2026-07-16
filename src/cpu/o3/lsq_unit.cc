@@ -1230,12 +1230,36 @@ LSQUnit::trySendPacket(bool isLoad, PacketPtr data_pkt)
         }
         request->packetNotSent();
     }
+#if defined (STARVATION_FREEDOM)
+    gem5::ThreadContext *thread = cpu->getContext(cpu->contextToThread(
+                                    request->contextId()));
+    if (data_pkt->isLL()) {
+      DPRINTF(LSQUnit, "%s: Found LL instruction %s \n", __func__, data_pkt->print());
+      DPRINTF(LSQUnit, "%s: Activating LLSC tracker \n", __func__);
+      thread->activateLLSCTracker(data_pkt->req->getPC());
+    } else if (data_pkt->isSC()) {
+      DPRINTF(LSQUnit, "%s: Found SC instruction &s \n", __func__, data_pkt->print());
+      DPRINTF(LSQUnit, "%s: Deactivating LLSC tracker %d \n", __func__,
+                            thread->getLLSCTrackerCommitInsnObserved());
+      thread->resetLLSCTracker();
+    }
+#endif
     DPRINTF(LSQUnit, "Memory request (pkt: %s) from inst [sn:%llu] was"
             " %ssent (cache is blocked: %d, cache_got_blocked: %d)\n",
             data_pkt->print(), request->instruction()->seqNum,
             ret ? "": "not ", lsq->cacheBlocked(), cache_got_blocked);
     return ret;
 }
+
+#if defined (STARVATION_FREEDOM)
+void
+LSQUnit::informLLSCReservationInvalidate() {
+  RequestPtr invLLSCReq = std::make_shared<Request>();
+  PacketPtr invLLSCPkt = new Packet(invLLSCReq, MemCmd::InvalidateLLSC);
+  dcachePort->sendTimingReq(invLLSCPkt);
+  return;
+}
+#endif
 
 void
 LSQUnit::startStaleTranslationFlush()

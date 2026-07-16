@@ -126,6 +126,15 @@ LSQ::name() const
     return iewStage->name() + ".lsq";
 }
 
+#if defined (STARVATION_FREEDOM)
+void
+LSQ::informLLSCReservationInvalidate(unsigned tid) {
+  Request::Flags flags;
+  LSQRequest* request = new SingleDataRequest(&thread[tid]);
+  request->informLLSCReservationInvalidate();
+}
+#endif
+
 void
 LSQ::setActiveThreads(std::list<ThreadID> *at_ptr)
 {
@@ -1050,6 +1059,19 @@ LSQ::SplitDataRequest::initiateTranslation()
     }
 }
 
+#if defined (STARVATION_FREEDOM)
+LSQ::LSQRequest::LSQRequest(LSQUnit *port):
+  _state(State::NotIssued),
+  _port(*port), _inst(nullptr), _data(nullptr),
+  _res(nullptr), _addr(0), _size(0), _flags(0),
+  _numOutstandingPackets(0), _amo_op(nullptr)
+{
+  flags.set(Flag::IsLoad, true);
+  // [ANIRUDH] Do we need to install it in the lsq unit?
+  //install();
+}
+#endif
+
 LSQ::LSQRequest::LSQRequest(
         LSQUnit *port, const DynInstPtr& inst, bool isLoad) :
     _state(State::NotIssued),
@@ -1338,6 +1360,22 @@ LSQ::SplitDataRequest::sendPacketToCache()
         _numOutstandingPackets++;
     }
 }
+
+#if defined (STARVATION_FREEDOM)
+void
+LSQ::SingleDataRequest::informLLSCReservationInvalidate() {
+  lsqUnit()->informLLSCReservationInvalidate();
+}
+
+void
+LSQ::SplitDataRequest::informLLSCReservationInvalidate() {
+  lsqUnit()->informLLSCReservationInvalidate();
+}
+
+void LSQ::UnsquashableDirectRequest::informLLSCReservationInvalidate() {
+  lsqUnit()->informLLSCReservationInvalidate();
+}
+#endif
 
 Cycles
 LSQ::SingleDataRequest::handleLocalAccess(

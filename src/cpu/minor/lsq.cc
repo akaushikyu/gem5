@@ -1172,7 +1172,6 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
 #if defined (STARVATION_FREEDOM)
 void
 LSQ::informLLSCReservationInvalidate() {
-  // [TODO]
   RequestPtr invLLSCReq = std::make_shared<Request>();
   PacketPtr invLLSCPkt = new Packet(invLLSCReq, MemCmd::InvalidateLLSC);
   dcachePort.sendTimingReq(invLLSCPkt);
@@ -1198,7 +1197,6 @@ LSQ::tryToSend(LSQRequestPtr request)
           DPRINTF(MinorMem, "%s: Found LL instruction %s\n", __func__, packet->print());
           DPRINTF(MinorMem, "%s: Activating LLSC tracker \n", __func__);
           thread->activateLLSCTracker(packet->req->getPC());
-
         } else if (packet->isSC()) {
           DPRINTF(MinorMem, "%s: Found SC instruction %s\n", __func__, packet->print());
           DPRINTF(MinorMem, "%s: Deactivating LLSC tracker %d\n", __func__,
@@ -1206,7 +1204,6 @@ LSQ::tryToSend(LSQRequestPtr request)
           thread->resetLLSCTracker();
         }
 #endif
-
         DPRINTF(MinorMem, "Trying to send request: %s addr: 0x%x\n",
             *(request->inst), packet->req->getVaddr());
 

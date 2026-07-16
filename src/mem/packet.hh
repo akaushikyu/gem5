@@ -720,7 +720,11 @@ class Packet : public Printable, public Extensible<Packet>
     void setCacheResponding()
     {
         assert(isRequest());
+#if defined (STARVATION_FREEDOM)
+        if (!cacheResponding())
+#else
         assert(!flags.isSet(CACHE_RESPONDING));
+#endif
         flags.set(CACHE_RESPONDING);
     }
     bool cacheResponding() const { return flags.isSet(CACHE_RESPONDING); }

@@ -1088,6 +1088,19 @@ Commit::commitInsts()
                 if (!interrupt && avoidQuiesceLiveLock &&
                     onInstBoundary && cpu->checkInterrupts(0))
                     squashAfter(tid, head_inst);
+#if defined (STARVATION_FREEDOM)
+                gem5::ThreadContext *thread = cpu->getContext(tid);
+                unsigned cbeCountLimit = thread->getSystemPtr()->getCBECountLimit();
+                DPRINTF(Commit, "%s: Incrementing commit insn count for LLSC tracker %d, limit: %d\n",
+                                __func__, thread->getLLSCTrackerCommitInsnObserved(), cbeCountLimit);
+                thread->incrementCommitInsnCntForLLSCTracker();
+                if (thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) {
+                  // This means that the number of committed instructions observed
+                  // has gone past 16. Send a signal to the memory to unblock the LL it is holding
+                  DPRINTF(Commit, "%s: Informing LLSC reservation invalidate\n", __func__);
+                  iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
+                }
+#endif
             } else {
                 DPRINTF(Commit, "Unable to commit head instruction PC:%s "
                         "[tid:%i] [sn:%llu].\n",
