@@ -991,6 +991,9 @@ ISA::handleLockedWrite(const RequestPtr &req, Addr cacheBlockMask)
         DPRINTF(LLSC, "[cid:%d]: SC failure! Current locked addr = %x.\n",
             req->contextId(), load_reservation_addr & cacheBlockMask);
         load_reservation_addr = INVALID_RESERVATION_ADDR;
+#if defined (STARVATION_FREEDOM)
+         panic("SC failure -- violating starvation freedom guarantee...");
+#endif
 
         return false;
     }

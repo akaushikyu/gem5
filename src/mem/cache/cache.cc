@@ -151,13 +151,12 @@ Cache::satisfyRequest(PacketPtr pkt, CacheBlk *blk,
     }
 #if defined (STARVATION_FREEDOM)
     if (pkt->isSC()) {
-      DPRINTF(Cache, "Marking SC as complete %s\n", pkt->print());
-      llscTrack.setStateToSCComplete();
       DPRINTF(Cache, "%s: IsActivePending: %s\n", __func__, llscTrack.isActivePending());
       // Once the SC has completed, check if anyone is pending....
       if (llscTrack.isActivePending()) {
         servicePendingRequestsOnLLSCAddr();
       }
+      DPRINTF(Cache, "%s: Set state to SC complete\n", __func__);
       llscTrack.setStateToSCComplete();
     }
 #endif
@@ -191,6 +190,7 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       DPRINTF(Cache, "%s: Tracking LLSC in LL issued state addr: %x\n", \
                      __func__, pkt->getBlockAddr(blkSize));
       llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+      DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
       llscTrack.setStateToLLIssued();
     }
 
@@ -1136,7 +1136,9 @@ Cache::servicePendingRequestsOnLLSCAddr() {
     bool doInvalidate = (ppkt->needsWritable()) ? true : false;
     servicePendingSnoopRequest(ppkt, blk, doInvalidate);
   }
+  DPRINTF(Cache, "%s: Marking LLSC track no pending requests to service\n", __func__);
   llscTrack.markNoPendingReq();
+  llscTrack.resetState();
 }
 
 void

@@ -233,6 +233,7 @@ BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
       DPRINTF(Cache, "%s Setup LLSC tracker for addr: %x %x, cycle %d\n", \
           __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize), curCycle());
       llscTrack.setLLCycle(curCycle());
+      DPRINTF(Cache, "%s: Set state to LL response received\n", __func__);
       llscTrack.setStateToLLRespRecvd();
     }
 #endif
@@ -519,6 +520,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
       DPRINTF(Cache, " %s Setup LLSC tracker for addr: %x %x, cycle %d\n", \
           __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize), curCycle());
       llscTrack.setLLCycle(curCycle());
+      DPRINTF(Cache, "%s: Set state to LL response received\n", __func__);
       llscTrack.setStateToLLRespRecvd();
     }
 #endif
@@ -1526,6 +1528,7 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
           DPRINTF(Cache, "%s: Tracking LL the address: %x %x\n", \
             __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
           llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+          DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
           llscTrack.setStateToLLDispatch();
         }
         /*
@@ -1974,6 +1977,7 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
       DPRINTF(Cache, "%s: Tracking the address: %x %x\n", \
           __func__, tgt_pkt->getAddr(), tgt_pkt->getBlockAddr(blkSize));
       llscTrack.recordLLAddr(tgt_pkt->getBlockAddr(blkSize));
+      DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
       llscTrack.setStateToLLDispatch();
     }
 #endif

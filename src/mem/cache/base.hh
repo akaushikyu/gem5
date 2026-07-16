@@ -1045,7 +1045,7 @@ class BaseCache : public ClockedObject
         }
       }
 
-      std::string getLLStateString() { return stringifyState(state); }
+
       void setStateToLLIssued() { state = State::LL_ISSUED; }
       void setStateToLLDispatch() { state = State::LL_DISPATCH; }
       void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
@@ -1055,6 +1055,8 @@ class BaseCache : public ClockedObject
       void markNoPendingReq() { isActiveOtherReqPending = false; \
                                 isActiveExclReqPending = false; \
                                 pendingList.clear(); }
+
+      std::string getLLStateString() { return stringifyState(state); }
       bool markPendingReq(PacketPtr pending) {
         if (!isActiveExclReqPending) {
           PacketPtr pp = new Packet(pending, false, true);
@@ -1098,7 +1100,7 @@ class BaseCache : public ClockedObject
                                 state == State::LL_DISPATCH ||
                                 state == State::LL_RESP_RECVD ||
                                 state == State::SC_DISPATCH); }
-      bool isMatchAddr(Addr incoming) { return (addr == incoming); }
+      bool isMatchAddr(Addr incoming) { return (isActive() && (addr == incoming)); }
       Cycles getLLCycle() { return LLCycle; }
       Addr getLLSCAddr() { return addr; }
       bool isLLSCActiveWithData() { return (state == State::LL_RESP_RECVD ||
