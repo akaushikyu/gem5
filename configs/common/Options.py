@@ -755,6 +755,10 @@ def addSEOptions(parser):
                             type=int,
                             default=(-1 & 0xFFFFFFFF),
         )
+        parser.add_argument("--cbe-insn-count-limit",
+                            type=int,
+                            default=(-1 & 0xFFFFFFFF),
+        )
 
     parser.add_argument(
         "--redirects",
@@ -817,6 +821,10 @@ def addFSOptions(parser):
 
     if buildEnv["USE_RISCV_ISA"]:
         parser.add_argument("--tbe-cycle-limit",
+                            type=int,
+                            default=(-1 & 0xFFFFFFFF),
+        )
+        parser.add_argument("--cbe-insn-count-limit",
                             type=int,
                             default=(-1 & 0xFFFFFFFF),
         )

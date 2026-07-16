@@ -177,6 +177,7 @@ System::System(const Params &p)
       memoryMode(p.mem_mode),
       _cacheLineSize(p.cache_line_size),
       _tbe_cycle_limit(p.tbe_cycle_limit),
+      _cbe_insn_cnt_limit(p.cbe_insn_count_limit),
       numWorkIds(p.num_work_ids),
       thermalModel(p.thermal_model),
       _m5opRange(p.m5ops_base ?

@@ -903,10 +903,11 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
             thread->getLLSCTrackerCommitInsnObserved());
       thread->resetLLSCTracker();
     } else {
-      DPRINTF(MinorExecute, "%s: Incrementing commit insn count for LLSC tracker %d\n", \
-                            __func__, thread->getLLSCTrackerCommitInsnObserved());
+      unsigned cbeCountLimit = thread->getSystemPtr()->getCBECountLimit();
+      DPRINTF(MinorExecute, "%s: Incrementing commit insn count for LLSC tracker %d, limit: %d\n", \
+                            __func__, thread->getLLSCTrackerCommitInsnObserved(), cbeCountLimit);
       thread->incrementCommitInsnCntForLLSCTracker();
-      if (thread->getLLSCTrackerCommitInsnObserved() > 2) {
+      if (thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) {
         // This means that the number of committed instructions observed
         // has gone past 16. Send a signal to the memory to unblock the LL it is holding
         ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);

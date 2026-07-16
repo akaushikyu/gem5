@@ -139,7 +139,8 @@ def config_filesystem(system, options=None):
             + "wp              : yes\n"
             + "flags           : fpu\n"
             + "cache alignment : {cacheline_size}\n"
-            + "TBE cycle limt : {tbe_cycle_limit}\n"
+            + "TBE cycle limit : {tbe_cycle_limit}\n"
+            + "CBE insn count limit : {cbe_insn_count_limit}\n"
             + "\n"
         )
         one_cpu = one_cpu.format(
@@ -151,7 +152,8 @@ def config_filesystem(system, options=None):
             # Note: this assumes the L2 is private to each core
             l2_size=l2_size,
             cacheline_size=system.cache_line_size.getValue(),
-            tbe_cycle_limit=system.tbe_cycle_limit.getValue()
+            tbe_cycle_limit=system.tbe_cycle_limit.getValue(),
+            cbe_insn_count_limit=system.cbe_insn_count_limit.getValue()
         )
         file_append((procdir, "cpuinfo"), one_cpu)
 
