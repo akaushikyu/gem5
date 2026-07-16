@@ -1191,6 +1191,22 @@ LSQ::tryToSend(LSQRequestPtr request)
     } else {
         PacketPtr packet = request->getHeadPacket();
 
+#if defined (STARVATION_FREEDOM)
+        ThreadContext *thread = cpu.getContext(cpu.contextToThread(
+                                    request->request->contextId()));
+        if (packet->isLL()) {
+          DPRINTF(MinorMem, "%s: Found LL instruction %s\n", __func__, packet->print());
+          DPRINTF(MinorMem, "%s: Activating LLSC tracker \n", __func__);
+          thread->activateLLSCTracker(packet->req->getPC());
+
+        } else if (packet->isSC()) {
+          DPRINTF(MinorMem, "%s: Found SC instruction %s\n", __func__, packet->print());
+          DPRINTF(MinorMem, "%s: Deactivating LLSC tracker %d\n", __func__,
+                              thread->getLLSCTrackerCommitInsnObserved());
+          thread->resetLLSCTracker();
+        }
+#endif
+
         DPRINTF(MinorMem, "Trying to send request: %s addr: 0x%x\n",
             *(request->inst), packet->req->getVaddr());
 
