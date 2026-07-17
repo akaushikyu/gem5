@@ -173,7 +173,7 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
               PacketList &writebacks)
 {
 #if defined (STARVATION_FREEDOM)
-    if (llscTrack.isActive()) {
+    if (llscTrack.isActiveAndData()) {
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
       bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
@@ -995,7 +995,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
                 DPRINTF(Cache, "Invalidating block as is_invalidate: %s, mshr->hasPostInvalidate() %s\n", \
                                 is_invalidate, mshr->hasPostInvalidate());
 #if defined (STARVATION_FREEDOM)
-                if (llscTrack.isActive()) {
+                if (llscTrack.isActiveAndOrdered()) {
                   DPRINTF(Cache, "LLSC is active on addr %x, incoming pkt addr: %x\n", \
                                   llscTrack.getLLSCAddr(), pkt->getAddr());
                   if (llscTrack.isMatchAddr(pkt->getAddr())) {
@@ -1298,7 +1298,7 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
             name());
 
 #if defined (STARVATION_FREEDOM)
-        if (llscTrack.isActive()) {
+        if (llscTrack.isActiveAndOrdered()) {
           DPRINTF(Cache, "%s: LLSC active on addr %x\n", __func__, llscTrack.getLLSCAddr());
           if (llscTrack.isMatchAddr(pkt->getAddr())) {
             DPRINTF(Cache, "%s: LLSC active address and incoming packet %s address match, marking pending\n",\
@@ -1544,6 +1544,31 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
     // also have the cost of the upwards snoops to account for
     pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay, snoop_delay +
                                          lookupLatency * clockPeriod());
+
+#if defined (STARVATION_FREEDOM)
+    /* [ANIRUDH, July 17] The rationale for doing this here is as follows:
+    * Currently, the only place we check for TBE expiry is when there is an access.
+    * However, what happens if the core does not make an access after the LL? The pipeline
+    * is stalled, or whatever? So, a solution is to check the TBE expiry on a snoop request, which
+    * are triggered on other cores' memory activity. Now, doing this early in the function will
+    * affect correctness. For example, consider an active LL that has observed two read requests to
+    * the same address. Suppose it observes a snoop from another core that is doing a LL. For correctness,
+    * this core should supply the data to the read requests and the LL. If we do the TBE expiry check
+    * and service pending requests earlier, then we will miss this LL and it will be starved...
+    */
+    if (llscTrack.isActiveAndData()) {
+      DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
+      DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
+      bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
+      if (reset || pkt->isInvalidateLLSC()) {
+        DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
+        if (llscTrack.isActivePending()) {
+          DPRINTF(Cache, "%s servicing pending requests on %x\n", __func__, llscTrack.getLLSCAddr());
+          servicePendingRequestsOnLLSCAddr();
+        }
+      }
+    }
+#endif
 
     return true;
 }

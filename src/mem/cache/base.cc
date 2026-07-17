@@ -509,7 +509,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
 
 #if defined (STARVATION_FREEDOM)
     DPRINTF(Cache, "RECEIVING TIMING RESPONSE\n");
-      if (llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
+      if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
       /* A LoadLockedReq may get converted to a ReadExReq by the Cache/MSHR
       * By default, LoadLockedReq are not marked as sent by cache and hence,
       * the conversion from LoadLockedReq to ReadExReq is done by the MSHR/Cache

@@ -1096,11 +1096,17 @@ class BaseCache : public ClockedObject
       }
 
       bool isActivePending() { return isActiveOtherReqPending; }
-      bool isActive() { return (state == State::LL_ISSUED ||
+      bool isActive() { return (
+                                state == State::LL_ISSUED ||
                                 state == State::LL_DISPATCH ||
                                 state == State::LL_RESP_RECVD ||
                                 state == State::SC_DISPATCH); }
-      bool isMatchAddr(Addr incoming) { return (isActive() && (addr == incoming)); }
+      bool isActiveAndOrdered() { return (state == State::LL_DISPATCH ||
+                                state == State::LL_RESP_RECVD ||
+                                state == State::SC_DISPATCH); }
+      bool isActiveAndData() { return (state == State::LL_RESP_RECVD ||
+                                       state == State::SC_DISPATCH); }
+      bool isMatchAddr(Addr incoming) { return ((addr == incoming)); }
       Cycles getLLCycle() { return LLCycle; }
       Addr getLLSCAddr() { return addr; }
       bool isLLSCActiveWithData() { return (state == State::LL_RESP_RECVD ||
