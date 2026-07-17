@@ -153,9 +153,13 @@ MemCmd::commandInfo[] =
             ReadResp, "ReadSharedReq" },
     /* LoadLockedReq: note that we use plain ReadResp as response, so that
      *                we can also use ReadRespWithInvalidate when needed */
-    // [ANIRUDH] TODO: For starvation freedom, we added the needs writable flag
+#if defined (STARVATION_FREEDOM)
     { {IsRead, NeedsWritable, IsLlsc, IsRequest, IsInvalidate, NeedsResponse},
             ReadExResp, "LoadLockedReq" },
+#else
+    { {IsRead, IsLlsc, IsRequest, NeedsResponse},
+            ReadResp, "LoadLockedReq" },
+#endif
     /* StoreCondReq */
     { {IsWrite, NeedsWritable, IsLlsc,
            IsRequest, IsInvalidate, NeedsResponse, HasData, FromCache},
