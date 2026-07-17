@@ -784,7 +784,12 @@ class Packet : public Printable, public Extensible<Packet>
     void setResponderHadWritable()
     {
         assert(cacheResponding());
+#if defined (STARVATION_FREEDOM)
+        if (!responderHadWritable())
+#else
         assert(!responderHadWritable());
+#endif
+
         flags.set(RESPONDER_HAD_WRITABLE);
     }
     bool responderHadWritable() const

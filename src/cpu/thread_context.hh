@@ -102,7 +102,7 @@ class ThreadContext : public PCEventScope
         PC(Addr(0)), active(false), commitInsnCnt(0) { }
 
       void setLLSCActive(Addr _pc) { PC = _pc; active = true; commitInsnCnt = 0; }
-      void resetLLSCActive() { active = false; /* commitInsnCnt = 0; */}
+      void resetLLSCActive() { active = false; commitInsnCnt = 0; }
       void incrementCommitInsnCnt() { commitInsnCnt++; }
 
       bool isLLSCActive() { return active; }
@@ -120,6 +120,10 @@ class ThreadContext : public PCEventScope
       if (llscTracker.isLLSCActive()) {
         llscTracker.incrementCommitInsnCnt();
       }
+    }
+
+    bool isLLSCTrackerActive() {
+      return llscTracker.isLLSCActive();
     }
 
     void resetLLSCTracker() {
