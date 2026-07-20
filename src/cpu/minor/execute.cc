@@ -893,13 +893,14 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
     ThreadContext *thread = cpu.getContext(thread_id);
 
 #if defined (STARVATION_FREEDOM)
+    DPRINTF(MinorExecute, "Trying to Committing inst: %s\n", *inst, inst->staticInst->isAtomic());
     unsigned cbeCountLimit = thread->getSystemPtr()->getCBECountLimit();
     DPRINTF(MinorExecute, "%s: Incrementing commit insn count for LLSC tracker %d, limit: %d\n", \
                           __func__, thread->getLLSCTrackerCommitInsnObserved(), cbeCountLimit);
     thread->incrementCommitInsnCntForLLSCTracker();
     if ((thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) ||
         (thread->isLLSCTrackerActive() && inst->staticInst->isSyscall())
-       ) {
+       ){
       DPRINTF(MinorExecute, "%s: Informing LLSC reservation invalidate\n", __func__);
       // This means that the number of committed instructions observed
       // has gone past 16. Send a signal to the memory to unblock the LL it is holding

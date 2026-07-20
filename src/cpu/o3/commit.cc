@@ -1094,11 +1094,14 @@ Commit::commitInsts()
                 DPRINTF(Commit, "%s: Incrementing commit insn count for LLSC tracker %d, limit: %d\n",
                                 __func__, thread->getLLSCTrackerCommitInsnObserved(), cbeCountLimit);
                 thread->incrementCommitInsnCntForLLSCTracker();
-                if (thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) {
+                if ((thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) ||
+                    (thread->isLLSCTrackerActive() && head_inst->staticInst->isSyscall())
+                   ) {
                   // This means that the number of committed instructions observed
                   // has gone past 16. Send a signal to the memory to unblock the LL it is holding
                   DPRINTF(Commit, "%s: Informing LLSC reservation invalidate\n", __func__);
                   iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
+                  thread->resetLLSCTracker();
                 }
 #endif
             } else {

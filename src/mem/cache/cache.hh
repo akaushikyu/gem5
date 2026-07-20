@@ -123,7 +123,7 @@ class Cache : public BaseCache
                                 bool already_copied, bool pending_inval);
 
 #if defined (STARVATION_FREEDOM)
-    void servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk, bool doInvalidate);
+    void servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk);
     void servicePendingRequestsOnLLSCAddr();
 #endif
 

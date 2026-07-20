@@ -95,6 +95,7 @@ Cache::satisfyRequest(PacketPtr pkt, CacheBlk *blk,
                 // if we have a dirty copy, make sure the recipient
                 // keeps it marked dirty (in the modified state)
                 if (blk->isSet(CacheBlk::DirtyBit)) {
+                    DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pkt->print());
                     pkt->setCacheResponding();
                     blk->clearCoherenceBits(CacheBlk::DirtyBit);
                 }
@@ -116,6 +117,7 @@ Cache::satisfyRequest(PacketPtr pkt, CacheBlk *blk,
                     if (!deferred_response) {
                         // respond with the line in Modified state
                         // (cacheResponding set, hasSharers not set)
+                        DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pkt->print());
                         pkt->setCacheResponding();
 
                         // if this cache is mostly inclusive, we
@@ -502,6 +504,7 @@ Cache::recvTimingReq(PacketPtr pkt)
         // copy (Modified or Owned) that will supply the right
         // data
         snoop_pkt->setExpressSnoop();
+        DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pkt->print());
         snoop_pkt->setCacheResponding();
 
         // this express snoop travels towards the memory, and at
@@ -610,6 +613,8 @@ Cache::createMissPacket(PacketPtr cpu_pkt, CacheBlk *blk,
     pkt->allocate();
     DPRINTF(Cache, "%s: created %s from %s\n", __func__, pkt->print(),
             cpu_pkt->print());
+    DPRINTF(Cache, "%s: set cache responding %s\n", __func__, pkt->cacheResponding());
+
     return pkt;
 }
 
@@ -1126,40 +1131,38 @@ Cache::servicePendingRequestsOnLLSCAddr() {
   DPRINTF(Cache, "%s: There is active pending requests %d to be serviced after SC,\n", \
                   __func__, pendingPktList.size());
   assert(!pendingPktList.empty());
+  CacheBlk* blk = tags->findBlock({pendingPktList[0]->getAddr(), false});
+  bool doInvalidate = false;
   for (auto ppkt : pendingPktList) {
     // [ANIRUDH] TODO need to rearrange the pendingPktList such that we first do read requests
     // and then exclusive requests...
     DPRINTF(Cache, "SC done and there is an active pending request %x\n", ppkt->print());
     DPRINTF(Cache, "Servicing pending snoop request\n");
-    CacheBlk* blk = tags->findBlock({ppkt->getAddr(), false});
+    //CacheBlk* blk = tags->findBlock({ppkt->getAddr(), false});
     ppkt->isRetrySnoop = true;
-    bool doInvalidate = (ppkt->needsWritable()) ? true : false;
-    servicePendingSnoopRequest(ppkt, blk, doInvalidate);
+    doInvalidate |= (ppkt->needsWritable()) ? true : false;
+    servicePendingSnoopRequest(ppkt, blk);
   }
   DPRINTF(Cache, "%s: Marking LLSC track no pending requests to service\n", __func__);
   llscTrack.markNoPendingReq();
   llscTrack.resetState();
+  (doInvalidate) ? invalidateBlock(blk) : blk->clearCoherenceBits(CacheBlk::WritableBit);
 }
 
 void
-Cache::servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk, bool doInvalidate) {
+Cache::servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk) {
   // [ANIRUDH] -- One issue that is coming up here is what to do
   // on a read shared snoop request? The doTimingSupplyResponse
   // function expects that the pkt will invalidate or has sharers...
   DPRINTF(CacheVerbose, "%s: for %s\n", __func__, pendingPkt->print());
-  if (!pendingPkt->cacheResponding()) {
-    pendingPkt->setCacheResponding();
-  }
-  if (!pendingPkt->responderHadWritable()) {
-    pendingPkt->setResponderHadWritable();
-  }
+  DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pendingPkt->print());
+  pendingPkt->setCacheResponding();
+  pendingPkt->setResponderHadWritable();
   if (pendingPkt->isRead() && !pendingPkt->needsWritable()) {
     DPRINTF(Cache, "%s: setting pending has sharers %s %s\n", __func__, pendingPkt->print(), pendingPkt->hasSharers());
     pendingPkt->setHasSharers();
   }
   doTimingSupplyResponse(pendingPkt, blk->data, false, false);
-  if (doInvalidate)
-    invalidateBlock(blk);
 }
 #endif
 
@@ -1314,8 +1317,10 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
               DPRINTF(Cache, "%s: Updated pending request in llsc tracker to %s %d \n", \
                               __func__, pkt->print(), pkt->req->requestorId());
               DPRINTF(Cache, "%s: Blk print after marking pending: %s\n", __func__, blk->print());
-              if (!pkt->cacheResponding()) {
-                pkt->setCacheResponding();
+              DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pkt->print());
+              pkt->setCacheResponding();
+              if (!pkt->needsWritable()) {
+                pkt->setHasSharers();
               }
               DPRINTF(Cache, "%s: Blk print after marking pending: %s\n", __func__, blk->print());
             }
@@ -1357,6 +1362,7 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
         // prevent anyone else from responding, cache as well as
         // memory, and also prevent any memory from even seeing the
         // request
+        DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pkt->print());
         pkt->setCacheResponding();
         if (!pkt->isClean() && blk->isSet(CacheBlk::WritableBit)) {
             // inform the cache hierarchy that this cache had the line
@@ -1515,6 +1521,7 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
         }
 
         if (respond) {
+            DPRINTF(Cache, "%s: Setting cache responding %s\n", __func__, pkt->print());
             pkt->setCacheResponding();
 
             if (have_writable) {
@@ -1662,6 +1669,7 @@ Cache::sendMSHRQueuePacket(MSHR* mshr)
             // if we are getting a snoop response with no sharers it
             // will be allocated as Modified
             bool pending_modified_resp = !snoop_pkt.hasSharers();
+            DPRINTF(Cache, "%s: Calling mark in service\n", __func__);
             markInService(mshr, pending_modified_resp);
 
             DPRINTF(Cache, "Upward snoop of prefetch for addr"
