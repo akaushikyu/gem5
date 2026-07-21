@@ -74,6 +74,20 @@ LSQ::LSQRequest::LSQRequest(LSQ &port_, MinorDynInstPtr inst_, bool isLoad_,
     request = std::make_shared<Request>();
 }
 
+LSQ::LSQStats::LSQStats(MinorCPU *cpu)
+  : statistics::Group(cpu, "lsq"),
+  ADD_STAT(LLIssued, statistics::units::Count::get(),
+      "Number of LL issued"),
+  ADD_STAT(SCIssued, statistics::units::Count::get(),
+      "Number of SC issued"),
+  ADD_STAT(SCFailed, statistics::units::Count::get(),
+      "Number of failed SC")
+{
+  LLIssued.flags(statistics::total);
+  SCIssued.flags(statistics::total);
+  SCFailed.flags(statistics::total);
+}
+
 void
 LSQ::LSQRequest::tryToSuppressFault()
 {
@@ -1135,9 +1149,13 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         /* Handle LLSC requests and tests */
         if (is_load) {
             thread.getIsaPtr()->handleLockedRead(&context, request->request);
+            stats.LLIssued++;
         } else {
             do_access = thread.getIsaPtr()->handleLockedWrite(&context,
                     request->request, cacheBlockMask);
+            stats.SCIssued++;
+            if (!do_access) stats.SCFailed++;
+
 
             if (!do_access) {
                 DPRINTF(MinorMem, "Not perfoming a memory "
@@ -1445,7 +1463,8 @@ LSQ::LSQ(std::string name_, std::string dcache_port_name_,
     numStoresInTransfers(0),
     numAccessesIssuedToMemory(0),
     retryRequest(NULL),
-    cacheBlockMask(~(cpu_.cacheLineSize() - 1))
+    cacheBlockMask(~(cpu_.cacheLineSize() - 1)),
+    stats(&cpu_)
 {
     if (in_memory_system_limit < 1) {
         fatal("%s: executeMaxAccessesInMemory must be >= 1 (%d)\n", name_,

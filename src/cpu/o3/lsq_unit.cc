@@ -270,11 +270,20 @@ LSQUnit::LSQUnitStats::LSQUnitStats(statistics::Group *parent)
                "Number of times an access to memory failed due to the cache "
                "being blocked"),
       ADD_STAT(loadToUse, "Distribution of cycle latency between the "
-                "first time a load is issued and its completion")
+                "first time a load is issued and its completion"),
+      ADD_STAT(LLIssued, statistics::units::Count::get(),
+               "Number of LL issued"),
+      ADD_STAT(SCIssued, statistics::units::Count::get(),
+               "Number of SC issued"),
+      ADD_STAT(SCFailed, statistics::units::Count::get(),
+               "Number of SC failed")
 {
     loadToUse
         .init(0, 299, 10)
         .flags(statistics::nozero);
+    LLIssued.flags(statistics::total);
+    SCIssued.flags(statistics::total);
+    SCFailed.flags(statistics::total);
 }
 
 void
@@ -867,6 +876,8 @@ LSQUnit::writebackStores()
             inst->recordResult(false);
             bool success = inst->tcBase()->getIsaPtr()->handleLockedWrite(
                     inst.get(), request->mainReq(), cacheBlockMask);
+            stats.SCIssued++;
+            if (!success) stats.SCFailed++;
             inst->recordResult(true);
             request->packetSent();
 
@@ -1387,6 +1398,7 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
         load_inst->recordResult(false);
         load_inst->tcBase()->getIsaPtr()->handleLockedRead(load_inst.get(),
                 request->mainReq());
+        stats.LLIssued++;
         load_inst->recordResult(true);
     }
 

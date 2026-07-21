@@ -644,6 +644,14 @@ class LSQ : public Named
     /** Snoop other threads monitors on memory system accesses */
     void threadSnoop(LSQRequestPtr request);
 
+    struct LSQStats : public statistics::Group {
+      LSQStats(MinorCPU *cpu);
+      /** Stats */
+      statistics::Scalar LLIssued;
+      statistics::Scalar SCIssued;
+      statistics::Scalar SCFailed;
+    } stats;
+
   public:
     LSQ(std::string name_, std::string dcache_port_name_,
         MinorCPU &cpu_, Execute &execute_,
