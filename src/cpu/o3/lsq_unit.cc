@@ -91,6 +91,7 @@ LSQUnit::WritebackEvent::description() const
 bool
 LSQUnit::recvTimingResp(PacketPtr pkt)
 {
+    DPRINTF(LSQUnit, "%s: Recv timing response for pkt: %s\n", __func__, pkt->print());
     LSQRequest *request = dynamic_cast<LSQRequest*>(pkt->senderState);
     assert(request != nullptr);
     bool ret = true;
@@ -165,6 +166,10 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
     assert(!cpu->switchedOut());
     if (!inst->isSquashed()) {
         if (request->needWBToRegister()) {
+            DPRINTF(LSQUnit, "%s: inst is LL %s, is SC %s, pk %s\n",
+                             __func__, inst->staticInst->isLoadLocked(),
+                             inst->staticInst->isStoreConditional(),
+                             pkt->print());
             // Only loads, store conditionals and atomics perform the writeback
             // after receving the response from the memory
             assert(inst->isLoad() || inst->isStoreConditional() ||
@@ -181,6 +186,21 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
                 request->writebackDone();
                 completeStore(request->instruction()->sqIt);
             }
+#if defined (STARVATION_FREEDOM)
+            gem5::ThreadContext *thread = cpu->getContext(cpu->contextToThread(
+                                    request->contextId()));
+            if (inst->staticInst->isLoadLocked()) {
+              DPRINTF(LSQUnit, "%s: Found LL instruction %s \n", __func__, pkt->print());
+              DPRINTF(LSQUnit, "%s: Activating LLSC tracker \n", __func__);
+              // [ANIRUDH] TODO need to disable and re-enable the tracker on seeing the same LL
+              thread->activateLLSCTracker(pkt->req->getPC());
+            } else if (inst->staticInst->isStoreConditional()) {
+              DPRINTF(LSQUnit, "%s: Found SC instruction &s \n", __func__, pkt->print());
+              DPRINTF(LSQUnit, "%s: Deactivating LLSC tracker %d \n", __func__,
+                            thread->getLLSCTrackerCommitInsnObserved());
+              thread->resetLLSCTracker();
+            }
+#endif
         } else if (inst->isStore()) {
             // This is a regular store (i.e., not store conditionals and
             // atomics), so it can complete without writing back
@@ -1241,20 +1261,6 @@ LSQUnit::trySendPacket(bool isLoad, PacketPtr data_pkt)
         }
         request->packetNotSent();
     }
-#if defined (STARVATION_FREEDOM)
-    gem5::ThreadContext *thread = cpu->getContext(cpu->contextToThread(
-                                    request->contextId()));
-    if (data_pkt->isLL()) {
-      DPRINTF(LSQUnit, "%s: Found LL instruction %s \n", __func__, data_pkt->print());
-      DPRINTF(LSQUnit, "%s: Activating LLSC tracker \n", __func__);
-      thread->activateLLSCTracker(data_pkt->req->getPC());
-    } else if (data_pkt->isSC()) {
-      DPRINTF(LSQUnit, "%s: Found SC instruction &s \n", __func__, data_pkt->print());
-      DPRINTF(LSQUnit, "%s: Deactivating LLSC tracker %d \n", __func__,
-                            thread->getLLSCTrackerCommitInsnObserved());
-      thread->resetLLSCTracker();
-    }
-#endif
     DPRINTF(LSQUnit, "Memory request (pkt: %s) from inst [sn:%llu] was"
             " %ssent (cache is blocked: %d, cache_got_blocked: %d)\n",
             data_pkt->print(), request->instruction()->seqNum,

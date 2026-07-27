@@ -32,6 +32,7 @@ from m5.objects import (
     AddrRange,
     Cache,
     DDR3_1600_8x8,
+    L2XBar,
     MemCtrl,
     O3CPU,
     Process,
@@ -66,27 +67,27 @@ parser.add_argument("--l2-size", type=str, default=None,
 
 # ---- O3CPU microarchitectural parameters --------------------------------
 # Pipeline stage widths (instructions/cycle at each stage)
-parser.add_argument("--fetch-width", type=int, default=8)
-parser.add_argument("--decode-width", type=int, default=8)
-parser.add_argument("--rename-width", type=int, default=8)
-parser.add_argument("--dispatch-width", type=int, default=8)
-parser.add_argument("--issue-width", type=int, default=8)
+parser.add_argument("--fetch-width", type=int, default=1)
+parser.add_argument("--decode-width", type=int, default=1)
+parser.add_argument("--rename-width", type=int, default=1)
+parser.add_argument("--dispatch-width", type=int, default=1)
+parser.add_argument("--issue-width", type=int, default=1)
 parser.add_argument("--wb-width", type=int, default=8)
-parser.add_argument("--commit-width", type=int, default=8)
-parser.add_argument("--squash-width", type=int, default=8)
+parser.add_argument("--commit-width", type=int, default=1)
+parser.add_argument("--squash-width", type=int, default=1)
 
 # Fetch queue / buffer depth
 parser.add_argument("--fetch-buffer-size", type=int, default=64)
-parser.add_argument("--fetch-queue-size", type=int, default=32)
+parser.add_argument("--fetch-queue-size", type=int, default=1)
 
 # Out-of-order core structures
-parser.add_argument("--rob-size", type=int, default=192,
+parser.add_argument("--rob-size", type=int, default=32,
                      help="Reorder buffer (ROB) entries")
-parser.add_argument("--num-iq-entries", type=int, default=64,
+parser.add_argument("--num-iq-entries", type=int, default=16,
                      help="Instruction queue (issue queue) entries")
-parser.add_argument("--lq-entries", type=int, default=32,
+parser.add_argument("--lq-entries", type=int, default=8,
                      help="Load queue entries")
-parser.add_argument("--sq-entries", type=int, default=32,
+parser.add_argument("--sq-entries", type=int, default=8,
                      help="Store queue entries")
 
 # Physical register file sizes
@@ -106,6 +107,7 @@ parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF
 
 args = parser.parse_args()
 
+
 # ----------------------------------------------------------------------
 # Cache class definitions
 # ----------------------------------------------------------------------
@@ -120,7 +122,7 @@ class L1Cache(Cache):
     tgts_per_mshr = 20
 
     def connectBus(self, bus):
-        """Connect this L1 cache's memory-side port to the crossbar."""
+        """Connect this L1 cache's memory-side port to the L2 crossbar."""
         self.mem_side = bus.cpu_side_ports
 
     def connectCPU(self, cpu):
@@ -140,6 +142,25 @@ class L1DCache(L1Cache):
     def connectCPU(self, cpu):
         self.cpu_side = cpu.dcache_port
 
+
+class L2Cache(Cache):
+    """Shared L2 cache. Coherence across cores is handled automatically
+    by the snooping CoherentXBar (L2XBar) that all the L1s sit on."""
+
+    assoc = 8
+    tag_latency = 20
+    data_latency = 20
+    response_latency = 20
+    mshrs = 20
+    tgts_per_mshr = 12
+
+    def connectCPUSideBus(self, bus):
+        self.cpu_side = bus.mem_side_ports
+
+    def connectMemSideBus(self, bus):
+        self.mem_side = bus.cpu_side_ports
+
+
 # ----------------------------------------------------------------------
 # System setup
 # ----------------------------------------------------------------------
@@ -157,13 +178,11 @@ system.mem_ranges = [AddrRange(args.mem_size)]
 
 num_cpus = args.num_cpus
 
-
 # ---- Starvation freedom  -------------------------------------------------
 system.tbe_cycle_limit = args.tbe_cycle_limit
 system.cbe_insn_count_limit = args.cbe_insn_count_limit
 
 # ---- CPUs ----------------------------------------------------------------
-
 system.cpu = [O3CPU(cpu_id=i) for i in range(num_cpus)]
 
 for cpu in system.cpu:
@@ -202,6 +221,9 @@ for cpu in system.cpu:
     cpu.renameToIEWDelay = args.rename_to_iew_delay
     cpu.iewToCommitDelay = args.iew_to_commit_delay
 
+    cpu.backComSize = 1
+    cpu.forwardComSize = 1
+
     # RISC-V needs no PIC wiring beyond this call, but each core needs
     # its own interrupt controller
     cpu.createInterruptController()
@@ -214,12 +236,38 @@ for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache)
     icache.connectCPU(cpu)
     dcache.connectCPU(cpu)
 
+# ---- L2 bus (connects every core's L1s to the shared L2) -----------------
+# L2XBar is a snooping CoherentXBar, so coherence between all the L1s
+# attached to it (and hence between cores) is maintained automatically.
+system.l2bus = L2XBar()
+for icache, dcache in zip(system.cpu_icache, system.cpu_dcache):
+    icache.connectBus(system.l2bus)
+    dcache.connectBus(system.l2bus)
+
+# ---- Shared L2 cache -------------------------------------------------------
+def _next_pow2(n):
+    p = 1
+    while p < n:
+        p *= 2
+    return p
+
+
+if args.l2_size:
+    l2_size = args.l2_size
+else:
+    # Cache size must yield size / (assoc * block_size) == a power of 2.
+    # 256kB gives exactly 512 sets at assoc=8/block=64B (itself a power
+    # of 2), so scale by the next power of 2 >= num_cpus to keep that
+    # property for any core count (including non-power-of-2 values like
+    # 3, 5, 6...).
+    l2_size = f"{256 * _next_pow2(num_cpus)}kB"
+
+system.l2cache = L2Cache(size=l2_size)
+system.l2cache.connectCPUSideBus(system.l2bus)
+
 # ---- Main (system) memory bus ---------------------------------------------
 system.membus = SystemXBar()
-
-for icache, dcache in zip(system.cpu_icache, system.cpu_dcache):
-    icache.connectBus(system.membus)
-    dcache.connectBus(system.membus)
+system.l2cache.connectMemSideBus(system.membus)
 
 # System port used by gem5 for functional accesses
 system.system_port = system.membus.cpu_side_ports

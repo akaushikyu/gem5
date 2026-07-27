@@ -619,8 +619,8 @@ BaseCache::recvTimingResp(PacketPtr pkt)
         }
     }
 
+    DPRINTF(Cache, "Done with serviceMSHRTargets for pkt: %s\n", pkt->print());
     serviceMSHRTargets(mshr, pkt, blk);
-    DPRINTF(Cache, "Done with serviceMSHRTargets for pkt: %s, blk: %s\n", pkt->print(), blk->print());
     // We are stopping servicing targets early for the Locked RMW Read until
     // the write comes.
     if (!mshr->hasLockedRMWReadTarget()) {
@@ -1291,6 +1291,11 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
 
     DPRINTF(Cache, "%s for %s %s\n", __func__, pkt->print(),
             blk ? "hit " + blk->print() : "miss");
+#if defined (STARVATION_FREEDOM)
+    if (pkt->isSC() && !blk) {
+      panic("SC failure -- violating starvation freedom guarantee...");
+    }
+#endif
 
     if (pkt->req->isCacheMaintenance()) {
         // A cache maintenance operation is always forwarded to the

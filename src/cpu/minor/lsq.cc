@@ -1214,6 +1214,7 @@ LSQ::tryToSend(LSQRequestPtr request)
         if (packet->isLL()) {
           DPRINTF(MinorMem, "%s: Found LL instruction %s\n", __func__, packet->print());
           DPRINTF(MinorMem, "%s: Activating LLSC tracker \n", __func__);
+          // [ANIRUDH] TODO If we see the same LL, we need to inform and invalidate....
           thread->activateLLSCTracker(packet->req->getPC());
         } else if (packet->isSC()) {
           DPRINTF(MinorMem, "%s: Found SC instruction %s\n", __func__, packet->print());

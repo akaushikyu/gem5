@@ -632,6 +632,19 @@ Commit::tick()
                     " ROB and ready to commit\n",
                     tid, inst->seqNum, inst->pcState());
 
+#if defined (STARVATION_FREEDOM)
+                // Special handling for system calls (eg. ecall)
+                gem5::ThreadContext *thread = cpu->getContext(tid);
+                DPRINTF(Commit, "%s isLLSCTrackerActive %s, isSyscall %s\n", __func__,
+                                thread->isLLSCTrackerActive(), inst->staticInst->isSyscall());
+                if (thread->isLLSCTrackerActive() && inst->staticInst->isSyscall()) {
+                  // This means that the number of committed instructions observed
+                  // has gone past 16. Send a signal to the memory to unblock the LL it is holding
+                  DPRINTF(Commit, "%s: Informing LLSC reservation invalidate\n", __func__);
+                  iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
+                  thread->resetLLSCTracker();
+                }
+#endif
         } else if (!rob->isEmpty(tid)) {
             const DynInstPtr &inst = rob->readHeadInst(tid);
 
@@ -946,8 +959,8 @@ Commit::commitInsts()
         assert(tid == commit_thread);
 
         DPRINTF(Commit,
-                "Trying to commit head instruction, [tid:%i] [sn:%llu]\n",
-                tid, head_inst->seqNum);
+                "Trying to commit head instruction, [tid:%i] [sn:%llu] %s, %s\n",
+                tid, head_inst->seqNum, head_inst->staticInst->isLoadLocked(), head_inst->staticInst->isStoreConditional());
 
         // If the head instruction is squashed, it is ready to retire
         // (be removed from the ROB) at any time.
@@ -1094,8 +1107,12 @@ Commit::commitInsts()
                 DPRINTF(Commit, "%s: Incrementing commit insn count for LLSC tracker %d, limit: %d\n",
                                 __func__, thread->getLLSCTrackerCommitInsnObserved(), cbeCountLimit);
                 thread->incrementCommitInsnCntForLLSCTracker();
+
+                DPRINTF(Commit, "%s isLLSCTrackerActive %s, isSyscall %s\n", __func__,
+                                thread->isLLSCTrackerActive(), head_inst->staticInst->isSyscall());
                 if ((thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) ||
-                    (thread->isLLSCTrackerActive() && head_inst->staticInst->isSyscall())
+                    (thread->isLLSCTrackerActive() && head_inst->staticInst->isSyscall()) ||
+                    (head_inst->staticInst->isStoreConditional())
                    ) {
                   // This means that the number of committed instructions observed
                   // has gone past 16. Send a signal to the memory to unblock the LL it is holding

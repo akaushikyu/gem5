@@ -101,7 +101,28 @@ class ThreadContext : public PCEventScope
       LLSCTracker():
         PC(Addr(0)), active(false), commitInsnCnt(0) { }
 
-      void setLLSCActive(Addr _pc) { PC = _pc; active = true; commitInsnCnt = 0; }
+      void setLLSCActive(Addr _pc) {
+        bool visitSamePC = (_pc == PC) ? true : false;
+        // if the LLSC is active and we are visiting
+        // the same LL PC, then the paired SC
+        // was not executed. In this case, do not
+        // reset the commit instruction count
+        if (active && visitSamePC) {
+          // do not reset the commitInsn Count
+        } else {
+          // This means one of the following is true:
+          // - LLSC tracker is active but executing a different LL
+          //   (active && !visitSamePC)
+          // - LLSC tracker is not active and executing the same LL
+          //   this means we executed the paired SC and again doing the LL/SC
+          //   (!active && visitSamePC)
+          // - LLSC tracker is not active and executing different LL
+          //   (!active && !visitSamePC)
+          active = true;
+          PC = _pc;
+          commitInsnCnt = 0;
+        }
+      }
       void resetLLSCActive() { active = false; commitInsnCnt = 0; }
       void incrementCommitInsnCnt() { commitInsnCnt++; }
 

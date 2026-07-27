@@ -180,6 +180,9 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
       bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
       if (reset || pkt->isInvalidateLLSC()) {
+        // It could be that when we timed out, the incoming packet is a SC
+        // In this case, the TBE was insufficient, and we should panic under
+        // starvation freedom
         DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
         if (llscTrack.isActivePending()) {
           DPRINTF(Cache, "%s servicing pending requests on %x\n", __func__, llscTrack.getLLSCAddr());
@@ -188,6 +191,11 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       }
     }
 
+    /* [ANIRUDH] A few changes need to be done for conditional LR/SC
+    * If the core sees another LR while a previous LR is pending, it should
+    * service pending requests and reset the LLSC state. This logic needs
+    * to be propagated to the pipeline changes as well....
+    */
     if (pkt->isLL()) {
       DPRINTF(Cache, "%s: Tracking LLSC in LL issued state addr: %x\n", \
                      __func__, pkt->getBlockAddr(blkSize));

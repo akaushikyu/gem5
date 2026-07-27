@@ -66,27 +66,27 @@ parser.add_argument("--l2-size", type=str, default=None,
 
 # ---- O3CPU microarchitectural parameters --------------------------------
 # Pipeline stage widths (instructions/cycle at each stage)
-parser.add_argument("--fetch-width", type=int, default=8)
-parser.add_argument("--decode-width", type=int, default=8)
-parser.add_argument("--rename-width", type=int, default=8)
-parser.add_argument("--dispatch-width", type=int, default=8)
-parser.add_argument("--issue-width", type=int, default=8)
+parser.add_argument("--fetch-width", type=int, default=1)
+parser.add_argument("--decode-width", type=int, default=1)
+parser.add_argument("--rename-width", type=int, default=1)
+parser.add_argument("--dispatch-width", type=int, default=1)
+parser.add_argument("--issue-width", type=int, default=1)
 parser.add_argument("--wb-width", type=int, default=8)
-parser.add_argument("--commit-width", type=int, default=8)
-parser.add_argument("--squash-width", type=int, default=8)
+parser.add_argument("--commit-width", type=int, default=1)
+parser.add_argument("--squash-width", type=int, default=1)
 
 # Fetch queue / buffer depth
 parser.add_argument("--fetch-buffer-size", type=int, default=64)
-parser.add_argument("--fetch-queue-size", type=int, default=32)
+parser.add_argument("--fetch-queue-size", type=int, default=1)
 
 # Out-of-order core structures
-parser.add_argument("--rob-size", type=int, default=192,
+parser.add_argument("--rob-size", type=int, default=32,
                      help="Reorder buffer (ROB) entries")
-parser.add_argument("--num-iq-entries", type=int, default=64,
+parser.add_argument("--num-iq-entries", type=int, default=16,
                      help="Instruction queue (issue queue) entries")
-parser.add_argument("--lq-entries", type=int, default=32,
+parser.add_argument("--lq-entries", type=int, default=8,
                      help="Load queue entries")
-parser.add_argument("--sq-entries", type=int, default=32,
+parser.add_argument("--sq-entries", type=int, default=8,
                      help="Store queue entries")
 
 # Physical register file sizes
@@ -202,6 +202,9 @@ for cpu in system.cpu:
     cpu.renameToIEWDelay = args.rename_to_iew_delay
     cpu.iewToCommitDelay = args.iew_to_commit_delay
 
+    cpu.backComSize = 1
+    cpu.forwardComSize = 1
+
     # RISC-V needs no PIC wiring beyond this call, but each core needs
     # its own interrupt controller
     cpu.createInterruptController()
@@ -252,6 +255,7 @@ m5.instantiate()
 
 print("Beginning simulation!")
 exit_event = m5.simulate(100000000000)
+#exit_event = m5.simulate()
 print(
     "Exiting @ tick {} because {}".format(
         m5.curTick(), exit_event.getCause()

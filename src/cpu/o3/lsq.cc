@@ -1067,8 +1067,6 @@ LSQ::LSQRequest::LSQRequest(LSQUnit *port):
   _numOutstandingPackets(0), _amo_op(nullptr)
 {
   flags.set(Flag::IsLoad, true);
-  // [ANIRUDH] Do we need to install it in the lsq unit?
-  //install();
 }
 #endif
 
