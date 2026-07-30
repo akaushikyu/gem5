@@ -219,31 +219,6 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
         // the packet is a memory-mapped request and should be
         // broadcasted to our snoopers but the source
         if (snoopFilter) {
-          /*
-#if defined (STARVATION_FREEDOM)
-            // Before doing operations on the snoop filter, first check if the snoop
-            // can be entertained by the cpu. If the cpu is doing an active LL/SC, then
-            // the snoop will not be permitted until it has finished the LL/SC or
-            // marked itself available for entertaining snoops through the LLSCTracker
-            // structure
-            auto sf_res_all = snoopFilter->functionalLookupRequest(pkt, *src_port);
-            // [ANIRUDH] This is problematic...
-            // Consider the following scenario, c0, c1, c2. C0 does the LL and SC
-            // while C1 and C2 are pending with LLs. Now, C1's snoop is denied by
-            // C0 because it had an active LLSC. However, after it finished its SC,
-            // C1's snoop continues to be denied because C2 says I have an active LL,
-            // but that's not true because it has not yet received its data response...
-
-            bool snoopAccept = trySnoop(pkt, cpu_side_port_id, sf_res_all.first);
-            DPRINTF(CoherentXBar, "SNOOP TARGETS FOUND for pkt %s\n", pkt->print());
-            if (!snoopAccept) {
-              // A call to try timing will push the req layer in the waitingForLayer vector
-              reqLayers[mem_side_port_id]->tryTiming(src_port);
-              reqLayers[mem_side_port_id]->failedSnoop(clockEdge(Cycles(1)));
-              return false;
-            }
-#endif
-            */
             // check with the snoop filter where to forward this packet
             auto sf_res = snoopFilter->lookupRequest(pkt, *src_port);
 

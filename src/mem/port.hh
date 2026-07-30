@@ -476,7 +476,6 @@ class ResponsePort : public Port, public AtomicResponseProtocol,
      *
      * @param pkt Packet to send.
      */
-    // [ANIRUDH] Changing sendTimingSnoopReq to bool
     bool
     sendTimingSnoopReq(PacketPtr pkt)
     {

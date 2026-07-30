@@ -192,7 +192,6 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
             if (inst->staticInst->isLoadLocked()) {
               DPRINTF(LSQUnit, "%s: Found LL instruction %s \n", __func__, pkt->print());
               DPRINTF(LSQUnit, "%s: Activating LLSC tracker \n", __func__);
-              // [ANIRUDH] TODO need to disable and re-enable the tracker on seeing the same LL
               thread->activateLLSCTracker(pkt->req->getPC());
             } else if (inst->staticInst->isStoreConditional()) {
               DPRINTF(LSQUnit, "%s: Found SC instruction &s \n", __func__, pkt->print());

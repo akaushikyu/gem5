@@ -1517,6 +1517,16 @@ class Packet : public Printable, public Extensible<Packet>
     isInvalidateLLSC() const {
       return cmd == MemCmd::InvalidateLLSC;
     }
+
+    bool
+    isReadExResp() const {
+      return cmd == MemCmd::ReadExResp;
+    }
+
+    bool
+    isUpgradeResp() const {
+      return cmd == MemCmd::UpgradeResp;
+    }
 #endif
 
     /**

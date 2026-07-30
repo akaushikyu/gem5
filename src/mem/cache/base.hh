@@ -1016,14 +1016,16 @@ class BaseCache : public ClockedObject
       // CBE -- Counter based environment
       State state;
 
+      // whether LL is reissued
+      bool reissue;
+
       bool isActiveOtherReqPending;
       bool isActiveExclReqPending;
-      // [ANIRUDH] Do we need pending sharer list...?
       std::vector<PacketPtr> pendingList;
       PacketPtr pendingPkt;
 
       LLSCTracker()
-        :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT),
+        :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT), reissue(false),
         isActiveOtherReqPending(false), isActiveExclReqPending(false), pendingPkt(NULL) { }
 
       std::string stringifyState(State state) {
@@ -1045,8 +1047,16 @@ class BaseCache : public ClockedObject
         }
       }
 
+      void setStateToLLIssued(bool isDiffLL = false) {
+        if (state == State::INIT) {
+          // irrespective of reissue flag, set state to LL_ISSUED
+          reissue = false;
+        } else {
+          reissue = !isDiffLL;
+        }
+        state = State::LL_ISSUED;
+      }
 
-      void setStateToLLIssued() { state = State::LL_ISSUED; }
       void setStateToLLDispatch() { state = State::LL_DISPATCH; }
       void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
       void setStateToSCDispatch() { state = State::SC_DISPATCH; }
@@ -1073,6 +1083,10 @@ class BaseCache : public ClockedObject
         return false;
       }
 
+      bool isDifferentLL(Addr LLaddr) {
+        return (addr != LLaddr);
+      }
+
       bool checkAndReset_TBE(Cycles currCycle, uint64_t tbeCycleLimit) {
         if (!isActive())
           return false;
@@ -1088,7 +1102,9 @@ class BaseCache : public ClockedObject
       }
 
       void setLLCycle(Cycles _curCycle) {
-        LLCycle = _curCycle;
+        // only set the LL cycle if this is **not** reissued LL
+        if (!reissue)
+          LLCycle = _curCycle;
       }
 
       void recordLLAddr(Addr _addr) {

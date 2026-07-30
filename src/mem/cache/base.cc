@@ -509,7 +509,16 @@ BaseCache::recvTimingResp(PacketPtr pkt)
 
 #if defined (STARVATION_FREEDOM)
     DPRINTF(Cache, "RECEIVING TIMING RESPONSE\n");
-      if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
+      if (llscTrack.isActive() &&
+          llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize)) &&
+          /* The rationale for this check is as follows:
+           * Consider a case where a core makes a read to an address followed
+           * by a LL. When the core receives the read response for the read
+           * it will erroneously mark the active tracker state as LL response received.
+           * On the contrary, the LL response received should be exercised when the data
+           * response for upgrade request due to LL is completed
+          */
+          (pkt->isReadExResp() || pkt->isUpgradeResp())) {
       /* A LoadLockedReq may get converted to a ReadExReq by the Cache/MSHR
       * By default, LoadLockedReq are not marked as sent by cache and hence,
       * the conversion from LoadLockedReq to ReadExReq is done by the MSHR/Cache
@@ -1552,9 +1561,6 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     incMissCount(pkt);
 
     lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency);
-
-    // [ANIRUDH] TODO: Add an assert that under starvation freedom, a SC will never
-    // be a miss
 
     if (!blk && pkt->isLLSC() && pkt->isWrite()) {
         // complete miss on store conditional... just give up now

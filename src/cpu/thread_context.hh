@@ -102,7 +102,7 @@ class ThreadContext : public PCEventScope
         PC(Addr(0)), active(false), commitInsnCnt(0) { }
 
       void setLLSCActive(Addr _pc) {
-        bool visitSamePC = (_pc == PC) ? true : false;
+        bool visitSamePC = (_pc == PC);
         // if the LLSC is active and we are visiting
         // the same LL PC, then the paired SC
         // was not executed. In this case, do not

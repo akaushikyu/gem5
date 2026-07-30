@@ -151,7 +151,6 @@ class TimingResponseProtocol
      */
     bool sendSnoopReq(TimingRequestProtocol *peer, PacketPtr pkt);
 
-    // [ANIRUDH] Adding sendRetrySnoopReq
     void sendRetrySnoopReq(TimingRequestProtocol *peer);
 
     /**

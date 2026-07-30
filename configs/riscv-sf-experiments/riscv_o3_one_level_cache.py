@@ -251,7 +251,7 @@ root = Root(full_system=False, system=system)
 m5.instantiate()
 
 print("Beginning simulation!")
-exit_event = m5.simulate(100000000000)
+exit_event = m5.simulate(99999999999)
 print(
     "Exiting @ tick {} because {}".format(
         m5.curTick(), exit_event.getCause()
