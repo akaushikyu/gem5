@@ -576,8 +576,26 @@ CoherentXBar::recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id)
     // determine the source port based on the id
     ResponsePort* src_port = cpuSidePorts[cpu_side_port_id];
 
+    DPRINTF(CoherentXBar, "%s: recieving timing snoop response on %s\n", __func__, pkt->print());
+
     // get the destination
     const auto route_lookup = routeTo.find(pkt->req);
+#if defined (STARVATION_FREEDOM)
+    if (route_lookup == routeTo.end()) {
+      // This can happen when a core c_i has a line in S and there is a pending
+      // LL. This LL is not yet broadcasted and ordered on the bus. Before this
+      // LL is broadcast, there is a core c_j that broadcasts a read response to the
+      // LL address and another core c_k has the requested line in O state. c_i
+      // doing the LL observes this request and marks it pending. However, c_k
+      // the core with the requested line in O state will supply the data response to
+      // c_j. When c_i completes its LL/SC or timesout, it will try to send the
+      // line to the c_j but there will be no route_lookup. In this case, we
+      // just return true...
+      DPRINTF(CoherentXBar, "%s: No route found, discarding snoop response pkt %s\n",
+              __func__, pkt->print());
+      return true;
+    }
+#endif
     assert(route_lookup != routeTo.end());
     const PortID dest_port_id = route_lookup->second;
     assert(dest_port_id != InvalidPortID);

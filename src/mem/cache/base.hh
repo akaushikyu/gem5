@@ -647,6 +647,10 @@ class BaseCache : public ClockedObject
      */
     virtual void doWritebacks(PacketList& writebacks, Tick forward_time) = 0;
 
+#if defined (STARVATION_FREEDOM)
+    virtual void servicePendingRequestsOnLLSCAddr() = 0;
+#endif
+
     /**
      * Send writebacks down the memory hierarchy in atomic mode
      */
@@ -1018,6 +1022,8 @@ class BaseCache : public ClockedObject
 
       // whether LL is reissued
       bool reissue;
+      // whether LL is squashed
+      bool squashed;
 
       bool isActiveOtherReqPending;
       bool isActiveExclReqPending;
@@ -1026,7 +1032,7 @@ class BaseCache : public ClockedObject
 
       LLSCTracker()
         :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT), reissue(false),
-        isActiveOtherReqPending(false), isActiveExclReqPending(false), pendingPkt(NULL) { }
+        squashed(false), isActiveOtherReqPending(false), isActiveExclReqPending(false), pendingPkt(NULL) { }
 
       std::string stringifyState(State state) {
         switch(state) {
@@ -1057,11 +1063,13 @@ class BaseCache : public ClockedObject
         state = State::LL_ISSUED;
       }
 
+      void setLLSquashed() { squashed = true; }
+
       void setStateToLLDispatch() { state = State::LL_DISPATCH; }
       void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
       void setStateToSCDispatch() { state = State::SC_DISPATCH; }
       void setStateToSCComplete() { state = State::SC_COMPLETE; }
-      void resetState() { state = State::INIT; }
+      void resetState() { state = State::INIT; squashed = false; }
       void markNoPendingReq() { isActiveOtherReqPending = false; \
                                 isActiveExclReqPending = false; \
                                 pendingList.clear(); }
@@ -1112,12 +1120,14 @@ class BaseCache : public ClockedObject
       }
 
       bool isActivePending() { return isActiveOtherReqPending; }
+      bool isSquashed() { return squashed; }
       bool isActive() { return (
                                 state == State::LL_ISSUED ||
                                 state == State::LL_DISPATCH ||
                                 state == State::LL_RESP_RECVD ||
                                 state == State::SC_DISPATCH); }
-      bool isActiveAndOrdered() { return (state == State::LL_DISPATCH ||
+      bool isActiveAndOrdered() { return (
+                                state == State::LL_DISPATCH ||
                                 state == State::LL_RESP_RECVD ||
                                 state == State::SC_DISPATCH); }
       bool isActiveAndData() { return (state == State::LL_RESP_RECVD ||

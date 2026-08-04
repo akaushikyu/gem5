@@ -45,8 +45,8 @@ from tqdm import tqdm
 # ----------------------------------------------------------------------
 GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc.py"
 COMPILE_SCRIPT = "./scripts/rv-sf-scripts/compile.sh"
-GEM5_SF = "./build/RISCV_NoRuby_SF/gem5.opt"
-GEM5_NOSF = "./build/RISCV_NoRuby_NoSF/gem5.opt"
+GEM5_SF = "./build/RISCV_NoRuby_SF/gem5.fast"
+GEM5_NOSF = "./build/RISCV_NoRuby_NoSF/gem5.fast"
 
 WORKLOAD_DIR = "rv-sf-workloads"
 OUTPUT_DIR = "riscv-lrsc-exp"
@@ -61,8 +61,8 @@ CACHE_CONFIGS = [
 # ----------------------------------------------------------------------
 # Sweep axes (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-#CPUS = [8, 4, 2]
-CPUS = [4]
+CPUS = [8, 4, 2]
+#CPUS = [4]
 INSN_BETWEEN = [1, 2, 3, 4]
 
 UNCOND_CBE = [1, 4, 8, 12, 16, 20, 50, 80, 100, 150]
@@ -70,7 +70,7 @@ UNCOND_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
 
 COND_EXIT_PATH = [1, 2, 4, 8, 12, 16, 20, 50]
 COND_RETRY_PATH = [1, 2, 4, 8, 12, 16, 20, 50]
-COND_CBE = [1, 4, 8, 12, 16, 20, 50]
+COND_CBE = [1, 4, 8, 12, 16, 20, 50, 100, 150]
 COND_NORETRY_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
 # NOTE: sweep.sh's conditional-retry tbe list has a duplicated "10 10",
 # kept as-is here for a faithful port (harmless - just runs that value twice).
@@ -280,17 +280,19 @@ def main():
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     jobs = (
-        #build_unconditional_jobs() +
-        #build_conditional_jobs(retry=False) +
+        build_unconditional_jobs() +
+        build_conditional_jobs(retry=False) +
         build_conditional_jobs(retry=True)
     )
 
     # --- Phase 1: generate + compile every workload -------------------
-    prep_cmds = []
+    gen_cmds = []
+    compile_cmds = []
     for job in jobs:
-        prep_cmds.append((job["gen_cmd"], WORKLOAD_DIR))
-        prep_cmds.append((job["compile_cmd"], WORKLOAD_DIR))
-    run_batches(prep_cmds, args.num_cpus, args.dry_run, desc="Generate+compile")
+        gen_cmds.append((job["gen_cmd"], WORKLOAD_DIR))
+        compile_cmds.append((job["compile_cmd"], WORKLOAD_DIR))
+    run_batches(gen_cmds, args.num_cpus, args.dry_run, desc="Generate")
+    run_batches(compile_cmds, args.num_cpus, args.dry_run, desc="Compile")
 
     # --- Phase 2: run every gem5 simulation ----------------------------
     sim_cmds = [sim for job in jobs for sim in job["sims"]]
@@ -298,7 +300,6 @@ def main():
 
     print(f"Done. {len(sim_cmds)} simulations across {len(jobs)} workloads "
           f"using {args.num_cpus} host cores.")
-
 
 if __name__ == "__main__":
     main()

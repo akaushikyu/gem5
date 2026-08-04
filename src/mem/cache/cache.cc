@@ -199,6 +199,12 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
           servicePendingRequestsOnLLSCAddr();
         }
       }
+    } else if (pkt->isInvalidateLLSC() && llscTrack.isActive()) {
+      // We received an invalidate LLSC while the LLSC track is not
+      // active. This case happens when we squash the LL typically in
+      // O3. In this case, mark the tracker as squashed and when we
+      // receive the data, service pending requests...
+      llscTrack.setLLSquashed();
     }
 
     /* [ANIRUDH] A few changes need to be done for conditional LR/SC
@@ -212,6 +218,8 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
       DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
       llscTrack.setStateToLLIssued(diffLLObserved);
+    } else if (pkt->isSC()) {
+      DPRINTF(Cache, "%s: Doing SC %x\n", __func__, pkt->print());
     }
 
     if (pkt->isInvalidateLLSC()) {
@@ -960,6 +968,14 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
                 // If intermediate cache got ReadRespWithInvalidate,
                 // propagate that.  Response should not have
                 // isInvalidate() set otherwise.
+#if defined (STARVATION_FREEDOM)
+              // Checking for active because the LL or upgrade from LL
+              // may not be ordered on the bus yet...
+              if (llscTrack.isActive() &&
+                  llscTrack.isMatchAddr(tgt_pkt->getBlockAddr(blkSize))) {
+                tgt_pkt->isLLSCActiveSnoop = true;
+              }
+#endif
                 tgt_pkt->cmd = MemCmd::ReadRespWithInvalidate;
                 DPRINTF(Cache, "%s: updated cmd to %s\n", __func__,
                         tgt_pkt->print());
@@ -1021,7 +1037,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
                 if (llscTrack.isActiveAndOrdered()) {
                   DPRINTF(Cache, "LLSC is active on addr %x, incoming pkt addr: %x\n", \
                                   llscTrack.getLLSCAddr(), pkt->getAddr());
-                  if (llscTrack.isMatchAddr(pkt->getAddr())) {
+                  if (llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
                     // do not invalidate the block
                     // we will anyways to this when we respond to the pending requestor
                     DPRINTF(Cache, "Not invalidating block\n");
@@ -1033,7 +1049,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
                 invalidateBlock(blk);
             } else if (mshr->hasPostDowngrade()) {
 #if defined (STARVATION_FREEDOM)
-              if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getAddr())) {
+              if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
                 // do not clear the coherence bit
                 // will do this anyways when responding to the pending requestor
                 DPRINTF(Cache, "%s Not downgrading yet.. will do this when responding after SC\n",\
@@ -1217,7 +1233,7 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
             Packet snoopPkt(pkt, true, true);
             snoopPkt.setExpressSnoop();
 #if defined (STARVATION_FREEDOM)
-    if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getAddr())) {
+    if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
       DPRINTF(Cache, "Setting LLSCActiveSnoop for packet: %s\n", snoopPkt.print());
       snoopPkt.isLLSCActiveSnoop = true;
     }
@@ -1321,7 +1337,7 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
          */
         if (llscTrack.isActiveAndOrdered()) {
           DPRINTF(Cache, "%s: LLSC active on addr %x\n", __func__, llscTrack.getLLSCAddr());
-          if (llscTrack.isMatchAddr(pkt->getAddr())) {
+          if (llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
             if (pkt->isUpgrade()) {
               DPRINTF(Cache, "%s: This is an upgrade request, no need to marking pending %s\n", __func__, pkt->print());
             } else {
@@ -1447,7 +1463,7 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
     DPRINTF(CacheVerbose, "%s: for %s\n", __func__, pkt->print());
 
 #if defined (STARVATION_FREEDOM)
-    if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getAddr())) {
+    if (llscTrack.isActive() && llscTrack.isMatchAddr(pkt->getBlockAddr(blkSize))) {
       DPRINTF(Cache, "%s: active LLSC with address match on %x, current llscTrack state: %s\n",
                       __func__, pkt->getAddr(), llscTrack.getLLStateString());
       if (llscTrack.isActivePending()) {
@@ -1598,7 +1614,6 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
       }
     }
 #endif
-
     return true;
 }
 

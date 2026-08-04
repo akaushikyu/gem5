@@ -124,7 +124,7 @@ class Cache : public BaseCache
 
 #if defined (STARVATION_FREEDOM)
     void servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk);
-    void servicePendingRequestsOnLLSCAddr();
+    void servicePendingRequestsOnLLSCAddr() override;
 #endif
 
     /**

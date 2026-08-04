@@ -531,6 +531,10 @@ BaseCache::recvTimingResp(PacketPtr pkt)
       llscTrack.setLLCycle(curCycle());
       DPRINTF(Cache, "%s: Set state to LL response received\n", __func__);
       llscTrack.setStateToLLRespRecvd();
+      if (llscTrack.isSquashed()) {
+        DPRINTF(Cache, "%s: This LL is squashed, servicing pending responses\n", __func__);
+        servicePendingRequestsOnLLSCAddr();
+      }
     }
 #endif
 
@@ -1300,6 +1304,7 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
 
     DPRINTF(Cache, "%s for %s %s\n", __func__, pkt->print(),
             blk ? "hit " + blk->print() : "miss");
+
 #if defined (STARVATION_FREEDOM)
     if (pkt->isSC() && !blk) {
       panic("SC failure -- violating starvation freedom guarantee...");
@@ -2740,7 +2745,7 @@ BaseCache::MemSidePort::recvFunctionalSnoop(PacketPtr pkt)
     if (cache->llscTrack.isActive()) {
       DPRINTF(Cache, "Receiving snoop request when LLSC is active on %x, checking \
           against incoming packet addr %x \n", cache->llscTrack.getLLSCAddr(), pkt->getAddr());
-      if (cache->llscTrack.isMatchAddr(pkt->getAddr())) {
+      if (cache->llscTrack.isMatchAddr(pkt->getBlockAddr(64))) {
         DPRINTF(Cache, "Not doing snoop as LL is active for %x\n", pkt->getAddr());
         return false;
       }

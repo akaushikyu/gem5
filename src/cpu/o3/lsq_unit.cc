@@ -186,6 +186,7 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
                 request->writebackDone();
                 completeStore(request->instruction()->sqIt);
             }
+            /*
 #if defined (STARVATION_FREEDOM)
             gem5::ThreadContext *thread = cpu->getContext(cpu->contextToThread(
                                     request->contextId()));
@@ -200,6 +201,7 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
               thread->resetLLSCTracker();
             }
 #endif
+            */
         } else if (inst->isStore()) {
             // This is a regular store (i.e., not store conditionals and
             // atomics), so it can complete without writing back
@@ -960,7 +962,18 @@ LSQUnit::squash(const InstSeqNum &squashed_num)
                 "[sn:%lli]\n",
                 loadQueue.back().instruction()->pcState(),
                 loadQueue.back().instruction()->seqNum);
-
+#if defined (STARVATION_FREEDOM)
+        gem5::ThreadContext *thread = cpu->getContext(lsqID);
+        if (thread->isLLIncomingWithAddr(
+          loadQueue.back().instruction()->pcState().instAddr(),
+          loadQueue.back().instruction()->seqNum)) {
+          // This is squashed....
+          DPRINTF(LSQUnit, "%s: Marking LL as squashed and informing reservation %x %d\n", __func__,
+                  loadQueue.back().instruction()->pcState().instAddr(), loadQueue.back().instruction()->seqNum);
+          informLLSCReservationInvalidate();
+          thread->resetLLSCTracker();
+        }
+#endif
         if (isStalled() && loadQueue.tail() == stallingLoadIdx) {
             stalled = false;
             stallingStoreIsn = 0;
@@ -1260,6 +1273,18 @@ LSQUnit::trySendPacket(bool isLoad, PacketPtr data_pkt)
         }
         request->packetNotSent();
     }
+#if defined (STARVATION_FREEDOM)
+    // if we see a load locked request, then just mark it here in the thread LLSC tracker
+    gem5::ThreadContext *thread = cpu->getContext(lsqID);
+    if (data_pkt->isLL()) {
+      DPRINTF(LSQUnit, "%s: Marking LL incoming on pkt addr: %x %x %d %s\n", __func__,
+                        data_pkt->getBlockAddr(64),
+                        data_pkt->req->getPC(),
+                        request->instruction()->seqNum,
+                        data_pkt->print());
+      thread->markLLIncoming(data_pkt->req->getPC(), request->instruction()->seqNum);
+    }
+#endif
     DPRINTF(LSQUnit, "Memory request (pkt: %s) from inst [sn:%llu] was"
             " %ssent (cache is blocked: %d, cache_got_blocked: %d)\n",
             data_pkt->print(), request->instruction()->seqNum,

@@ -753,7 +753,8 @@ def addSEOptions(parser):
     if buildEnv["USE_RISCV_ISA"]:
         parser.add_argument("--tbe-cycle-limit",
                             type=int,
-                            default=(-1 & 0xFFFFFFFF),
+                            #default=(-1 & 0xFFFFFFFF),
+                            default=(200),
         )
         parser.add_argument("--cbe-insn-count-limit",
                             type=int,
@@ -822,7 +823,8 @@ def addFSOptions(parser):
     if buildEnv["USE_RISCV_ISA"]:
         parser.add_argument("--tbe-cycle-limit",
                             type=int,
-                            default=(-1 & 0xFFFFFFFF),
+                            #default=(-1 & 0xFFFFFFFF),
+                            default=(200),
         )
         parser.add_argument("--cbe-insn-count-limit",
                             type=int,

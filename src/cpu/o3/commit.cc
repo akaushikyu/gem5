@@ -631,7 +631,6 @@ Commit::tick()
             DPRINTF(Commit,"[tid:%i] Instruction [sn:%llu] PC %s is head of"
                     " ROB and ready to commit\n",
                     tid, inst->seqNum, inst->pcState());
-
 #if defined (STARVATION_FREEDOM)
                 // Special handling for system calls (eg. ecall)
                 gem5::ThreadContext *thread = cpu->getContext(tid);
@@ -957,7 +956,6 @@ Commit::commitInsts()
         ThreadID tid = head_inst->threadNumber;
 
         assert(tid == commit_thread);
-
         DPRINTF(Commit,
                 "Trying to commit head instruction, [tid:%i] [sn:%llu] %s, %s\n",
                 tid, head_inst->seqNum, head_inst->staticInst->isLoadLocked(), head_inst->staticInst->isStoreConditional());
@@ -965,7 +963,21 @@ Commit::commitInsts()
         // If the head instruction is squashed, it is ready to retire
         // (be removed from the ROB) at any time.
         if (head_inst->isSquashed()) {
-
+          /*
+#if defined (STARVATION_FREEDOM)
+          // if a LL is squashed, then we need to inform the memory
+          // about it..
+          if (head_inst->staticInst->isLoadLocked()) {
+            gem5::ThreadContext *thread = cpu->getContext(tid);
+            if (thread->isLLSCTrackerActive()) {
+              // disable the tracker and let the memory know...
+              DPRINTF(Commit, "%s: Informing LLSC reservation invalidate as LL is squashed\n", __func__);
+              iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
+              thread->resetLLSCTracker();
+            }
+          }
+#endif
+          */
             DPRINTF(Commit, "Retiring squashed instruction from "
                     "ROB.\n");
 
@@ -1110,6 +1122,28 @@ Commit::commitInsts()
 
                 DPRINTF(Commit, "%s isLLSCTrackerActive %s, isSyscall %s\n", __func__,
                                 thread->isLLSCTrackerActive(), head_inst->staticInst->isSyscall());
+
+                DPRINTF(Commit, "%s: isLoadLocked %s, PC: %x, LLSCTracker %s, incomingLLPC: %x\n",
+                                __func__, head_inst->staticInst->isLoadLocked(),
+                                head_inst->pcState().instAddr(), thread->isLLSCTrackerActive(),
+                                thread->getIncomingLLAddr());
+                if (head_inst->staticInst->isLoadLocked()) {
+                  DPRINTF(Commit, "%s: Activating LLSC tracker on PC: %x on commit\n", __func__, head_inst->pcState().instAddr());
+                  thread->activateLLSCTracker(head_inst->pcState().instAddr());
+                }
+                /*
+                // [ANIRUDH] Perhaps put the tracker activation here....
+                if (head_inst->staticInst->isLoadLocked() &&
+                    thread->isLLIncomingWithAddr(head_inst->pcState().instAddr()) &&
+                    !thread->isLLSCTrackerActive()) {
+                  // This means we are committing a LL instruction but we did not mark it
+                  // active when we received the data in the LSQ unit..., so mark the tracker active
+                  // here
+                  DPRINTF(Commit, "%s: Activating LLSC tracker on PC: %x on commit\n", __func__, head_inst->pcState().instAddr());
+                  thread->activateLLSCTracker(head_inst->pcState().instAddr());
+                  thread->resetLLIncoming();
+                }
+                */
                 if ((thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) ||
                     (thread->isLLSCTrackerActive() && head_inst->staticInst->isSyscall()) ||
                     (head_inst->staticInst->isStoreConditional())

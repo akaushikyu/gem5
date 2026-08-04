@@ -53,7 +53,7 @@ def make_dir_pattern(ee_type, code_type, core_type, cache_levels):
             r"SF-" + re.escape(code_type) +
             r"-bb-(?P<bb>\d+)-" + re.escape(core_type) +
             r"-" + re.escape(cache_levels) +
-            r"-" + re.escape(ee_type) + 
+            r"-" + re.escape(ee_type) +
             r"-(?P<ee_type>\d+)-num-cpus-(?P<num_cpus>\d+)"
         )
     elif (code_type == "cnr"):
@@ -61,19 +61,19 @@ def make_dir_pattern(ee_type, code_type, core_type, cache_levels):
             r"SF-" + re.escape(code_type) +
             r"-bb-(?P<bb>\d+)-eb-(?P<eb>\d+)-" + re.escape(core_type) +
             r"-" + re.escape(cache_levels) +
-            r"-" + re.escape(ee_type) + 
+            r"-" + re.escape(ee_type) +
             r"-(?P<ee_type>\d+)-num-cpus-(?P<num_cpus>\d+)"
         )
     else:
         return re.compile(
             r"SF-" + re.escape(code_type) +
-            r"-bb-(?P<bb>\d+)-rb-(?P<eb>\d+)-" + re.escape(core_type) +
+            r"-bb-(?P<bb>\d+)-rb-(?P<rb>\d+)-" + re.escape(core_type) +
             r"-" + re.escape(cache_levels) +
-            r"-" + re.escape(ee_type) + 
+            r"-" + re.escape(ee_type) +
             r"-(?P<ee_type>\d+)-num-cpus-(?P<num_cpus>\d+)"
         )
 
-def parse_directory_name(dirname, dir_pattern):
+def parse_directory_name(code_type, dirname, dir_pattern):
     """
     Extract (bb, ee, num_cpus) as ints from a directory name using the
     given compiled dir_pattern (see make_dir_pattern).
@@ -83,12 +83,30 @@ def parse_directory_name(dirname, dir_pattern):
     match = dir_pattern.search(dirname)
     if not match:
         return None
-    return (
-        int(match.group("bb")),
-        int(match.group("ee_type")),
-        int(match.group("num_cpus")),
-    )
-
+    if (code_type == "uc"):
+        return (
+            int(match.group("bb")),
+            None,
+            None,
+            int(match.group("ee_type")),
+            int(match.group("num_cpus")),
+        )
+    elif (code_type == "cnr"):
+        return (
+            int(match.group("bb")),
+            None,
+            int(match.group("eb")),
+            int(match.group("ee_type")),
+            int(match.group("num_cpus")),
+        )
+    else:
+        return (
+            int(match.group("bb")),
+            int(match.group("rb")),
+            None,
+            int(match.group("ee_type")),
+            int(match.group("num_cpus")),
+        )
 
 def build_matrix(df, num_cpus, ee_type, code_type, core_type, cache_levels):
     """
@@ -110,14 +128,13 @@ def build_matrix(df, num_cpus, ee_type, code_type, core_type, cache_levels):
 
     rows = []
     for dirname, success in zip(dir_series, df["success"]):
-        parsed = parse_directory_name(str(dirname), dir_pattern)
-        #print(f"Looking at {dirname}")
+        parsed = parse_directory_name(code_type, str(dirname), dir_pattern)
         if parsed is None:
             continue
-        bb, ee, cpus = parsed
+        bb, rb, eb, ee, cpus = parsed
         if cpus != num_cpus:
             continue
-        rows.append({"bb": bb, "ee": ee, "success": success})
+        rows.append({"bb": bb, "rb": rb, "eb": eb, "ee": ee, "success": success})
 
     if not rows:
         raise ValueError(
@@ -129,15 +146,17 @@ def build_matrix(df, num_cpus, ee_type, code_type, core_type, cache_levels):
     parsed_df = pd.DataFrame(rows)
 
     # If there are duplicate (bb, ee) entries, keep the last one and warn.
-    if parsed_df.duplicated(subset=["bb", "ee"]).any():
-        dupes = parsed_df[parsed_df.duplicated(subset=["bb", "ee"], keep=False)]
+    if parsed_df.duplicated(subset=["bb", "rb", "eb", "ee"]).any():
+        dupes = parsed_df[parsed_df.duplicated(subset=["bb", "rb", "eb", "ee"], keep=False)]
+
         print(
             "Warning: multiple directories map to the same (bb, ee) pair for "
             f"num-cpus={num_cpus}; keeping the last one for each:\n{dupes}"
         )
-        parsed_df = parsed_df.drop_duplicates(subset=["bb", "ee"], keep="last")
+        parsed_df = parsed_df.drop_duplicates(subset=["bb", "rb", "eb", "ee"], keep="last")
 
-    matrix = parsed_df.pivot(index="bb", columns="ee", values="success")
+
+    matrix = parsed_df.pivot(index=["bb", "rb", "eb"], columns="ee", values="success")
     matrix = matrix.sort_index(axis=0).sort_index(axis=1)
     return matrix
 
@@ -151,21 +170,27 @@ def plot_matrix(matrix, num_cpus, output_path=None, show=False, config_label=Non
     def _to_numeric(v):
         return 1 if v is True else (0 if v is False else np.nan)
 
-    if hasattr(matrix, "map"):
-        numeric = matrix.map(_to_numeric)
-    else:  # pandas < 2.1 fallback
-        numeric = matrix.applymap(_to_numeric)
+    #if hasattr(matrix, "map"):
+    #    numeric = matrix.map(_to_numeric)
+    #else:  # pandas < 2.1 fallback
+    #    numeric = matrix.applymap(_to_numeric)
 
-    cmap = ListedColormap(["#d9534f", "#5cb85c"])  # 0 -> red, 1 -> green
+    #cmap -- green for pass,
+    #        pink for SC failure,
+    #        red for time limit reached
+    #        black for aborted string
+    #        white for everything else
+    cmap = ListedColormap(["#5cb85c","#f700a9","#d90000","#010000","#f7fcfa"])
+    #cmap = ListedColormap(["#d9534f", "#5cb85c"])  # 0 -> red, 1 -> green
     cmap.set_bad(color="#e0e0e0")  # NaN -> light gray
 
-    masked = np.ma.masked_invalid(numeric.values)
+    masked = np.ma.masked_invalid(matrix.values)
 
     fig_width = max(4, 0.6 * len(matrix.columns) + 2)
     fig_height = max(3, 0.6 * len(matrix.index) + 2)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-    ax.imshow(masked, cmap=cmap, vmin=0, vmax=1, aspect="auto")
+    ax.imshow(masked, cmap=cmap, vmin=0, vmax=4, aspect="auto")
 
     ax.set_xticks(range(len(matrix.columns)))
     ax.set_xticklabels(matrix.columns)
@@ -173,7 +198,7 @@ def plot_matrix(matrix, num_cpus, output_path=None, show=False, config_label=Non
     ax.set_yticklabels(matrix.index)
 
     ax.set_xlabel("ee (configuration)")
-    ax.set_ylabel("bb (number of blobs)")
+    ax.set_ylabel("<bb,rb,eb> (number of blobs, rb, eb)")
     title = f"Success / Failure Matrix (num-cpus = {num_cpus}"
     title += f", {config_label})" if config_label else ")"
     ax.set_title(title)
@@ -188,19 +213,24 @@ def plot_matrix(matrix, num_cpus, output_path=None, show=False, config_label=Non
     for i, bb in enumerate(matrix.index):
         for j, ee in enumerate(matrix.columns):
             val = matrix.loc[bb, ee]
-            if val is True:
+            if val == 0:
                 text = "PASS"
-            elif val is False:
+            elif val == 1:
                 text = "FAIL"
+            elif val == 2:
+                text = "OT"
             else:
-                text = "N/A"
-            ax.text(j, i, text, ha="center", va="center", fontsize=9, fontweight="bold",
-                     color="white" if text in ("PASS", "FAIL") else "black")
+                text = "ABT"
+            ax.text(j, i, text, ha="center", va="center", fontsize=6, fontweight="bold",
+                     color="white" if text in ("PASS", "FAIL", "OT", "ABT") else "black")
 
+    cmap = ListedColormap(["#5cb85c","#f700a9","#d90000","#010000","#f7fcfa"])
     legend_elements = [
         Patch(facecolor="#5cb85c", label="Success"),
-        Patch(facecolor="#d9534f", label="Failure"),
-        Patch(facecolor="#e0e0e0", label="No data"),
+        Patch(facecolor="#f700a9", label="Failure (starvation freedom)"),
+        Patch(facecolor="#d90000", label="Overrun simulation time (FATAL)"),
+        Patch(facecolor="#010000", label="Aborted (FATAL)"),
+        Patch(facecolor="#f7fcfa", label="No data"),
     ]
     ax.legend(handles=legend_elements, loc="upper left", bbox_to_anchor=(1.02, 1.0))
 

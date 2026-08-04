@@ -35,6 +35,10 @@ import pandas as pd
 
 # The exact success string we're looking for in simout.txt
 SUCCESS_STRING = "Done. g_counter final value"
+SF_VIOLATION_STRING = "SC failure -- violating starvation freedom"
+LIMIT_STRING = "limit reached"
+ABORTED_STRING = "aborted at"
+
 
 # Scalar (system-wide, appears once) stats to pull out of stats.txt.
 # Keys are the column names used in the DataFrame; values are the
@@ -73,7 +77,16 @@ def check_simout(simout_path):
     try:
         with open(simout_path, "r", errors="ignore") as f:
             content = f.read()
-        return SUCCESS_STRING in content
+        if (SUCCESS_STRING in content):
+            return 0
+        if (SF_VIOLATION_STRING in content):
+            return 1
+        if (LIMIT_STRING in content):
+            return 2
+        if (ABORTED_STRING in content):
+            return 3
+        else:
+            return 4
     except (IOError, OSError):
         return None
 
@@ -165,8 +178,8 @@ def collect_results(root_dir):
             simout_path = os.path.join(dirpath, "simout.txt")
             stats_path = os.path.join(dirpath, "stats.txt")
 
-            success = check_simout(simout_path)
-            row = {"success": success}
+            successCode = check_simout(simout_path)
+            row = {"success": successCode}
 
             # Use the directory path (relative to root_dir) as the key.
             key = os.path.relpath(dirpath, root_dir)

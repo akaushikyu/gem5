@@ -95,11 +95,15 @@ class ThreadContext : public PCEventScope
     // This is the tracker for IBE and CBE
     struct LLSCTracker {
       Addr PC;
+      Addr LLAddr;
       bool active;
+      bool isLLIncoming;
+      // seqNum only used for o3
+      unsigned seqNum;
       unsigned commitInsnCnt;
 
       LLSCTracker():
-        PC(Addr(0)), active(false), commitInsnCnt(0) { }
+        PC(Addr(0)), LLAddr(Addr(0)), active(false), isLLIncoming(false), seqNum(0), commitInsnCnt(0) { }
 
       void setLLSCActive(Addr _pc) {
         bool visitSamePC = (_pc == PC);
@@ -123,12 +127,21 @@ class ThreadContext : public PCEventScope
           commitInsnCnt = 0;
         }
       }
-      void resetLLSCActive() { active = false; commitInsnCnt = 0; }
+      void resetLLSCActive() { active = false; isLLIncoming = false; seqNum = 0, commitInsnCnt = 0; }
       void incrementCommitInsnCnt() { commitInsnCnt++; }
+      void markLLIncoming(Addr ll, unsigned int sn) { LLAddr = ll, seqNum = sn, isLLIncoming = true; }
+      void resetLLIncoming() { isLLIncoming = false; }
 
       bool isLLSCActive() { return active; }
       unsigned returnCommitInsnCnt() { return commitInsnCnt; }
+      bool isLLIncomingWithAddr(Addr a, unsigned sn) {
+        // LL must match the PC and the sequence number
+        if (isLLIncoming && (a == LLAddr) && (seqNum == sn))
+          return true;
+        return false;
+      }
       Addr getLLSCActivePC() { return PC; }
+      Addr getIncomingLLAddr() { return LLAddr; }
     };
 
     LLSCTracker llscTracker;
@@ -137,10 +150,27 @@ class ThreadContext : public PCEventScope
       llscTracker.setLLSCActive(PC);
     }
 
+    Addr getIncomingLLAddr() {
+      return llscTracker.getIncomingLLAddr();
+    }
+
+    void resetLLIncoming() {
+      llscTracker.resetLLIncoming();
+    }
+
+    bool isLLIncomingWithAddr(Addr a, unsigned sn = 0) {
+      return llscTracker.isLLIncomingWithAddr(a, sn);
+    }
+
+
     void incrementCommitInsnCntForLLSCTracker() {
       if (llscTracker.isLLSCActive()) {
         llscTracker.incrementCommitInsnCnt();
       }
+    }
+
+    void markLLIncoming(Addr ll, unsigned sn = 0) {
+      llscTracker.markLLIncoming(ll, sn);
     }
 
     bool isLLSCTrackerActive() {

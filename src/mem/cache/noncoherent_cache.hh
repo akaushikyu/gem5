@@ -77,6 +77,10 @@ class NoncoherentCache : public BaseCache
 
     void recvTimingReq(PacketPtr pkt) override;
 
+#if defined (STARVATION_FREEDOM)
+    void servicePendingRequestsOnLLSCAddr() override;
+#endif
+
     void doWritebacks(PacketList& writebacks,
                       Tick forward_time) override;
 
