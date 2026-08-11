@@ -91,6 +91,100 @@ class ThreadContext : public PCEventScope
     bool useForClone = false;
 
   public:
+#if defined (STARVATION_FREEDOM)
+    // This is the tracker for IBE and CBE
+    struct LLSCTracker {
+      Addr PC;
+      Addr LLAddr;
+      bool active;
+      bool isLLIncoming;
+      // seqNum only used for o3
+      unsigned seqNum;
+      unsigned commitInsnCnt;
+
+      LLSCTracker():
+        PC(Addr(0)), LLAddr(Addr(0)), active(false), isLLIncoming(false), seqNum(0), commitInsnCnt(0) { }
+
+      void setLLSCActive(Addr _pc) {
+        bool visitSamePC = (_pc == PC);
+        // if the LLSC is active and we are visiting
+        // the same LL PC, then the paired SC
+        // was not executed. In this case, do not
+        // reset the commit instruction count
+        if (active && visitSamePC) {
+          // do not reset the commitInsn Count
+        } else {
+          // This means one of the following is true:
+          // - LLSC tracker is active but executing a different LL
+          //   (active && !visitSamePC)
+          // - LLSC tracker is not active and executing the same LL
+          //   this means we executed the paired SC and again doing the LL/SC
+          //   (!active && visitSamePC)
+          // - LLSC tracker is not active and executing different LL
+          //   (!active && !visitSamePC)
+          active = true;
+          PC = _pc;
+          commitInsnCnt = 0;
+        }
+      }
+      void resetLLSCActive() { active = false; isLLIncoming = false; seqNum = 0, commitInsnCnt = 0; }
+      void incrementCommitInsnCnt() { commitInsnCnt++; }
+      void markLLIncoming(Addr ll, unsigned int sn) { LLAddr = ll, seqNum = sn, isLLIncoming = true; }
+      void resetLLIncoming() { isLLIncoming = false; }
+
+      bool isLLSCActive() { return active; }
+      unsigned returnCommitInsnCnt() { return commitInsnCnt; }
+      bool isLLIncomingWithAddr(Addr a, unsigned sn) {
+        // LL must match the PC and the sequence number
+        if (isLLIncoming && (a == LLAddr) && (seqNum == sn))
+          return true;
+        return false;
+      }
+      Addr getLLSCActivePC() { return PC; }
+      Addr getIncomingLLAddr() { return LLAddr; }
+    };
+
+    LLSCTracker llscTracker;
+
+    void activateLLSCTracker(Addr PC) {
+      llscTracker.setLLSCActive(PC);
+    }
+
+    Addr getIncomingLLAddr() {
+      return llscTracker.getIncomingLLAddr();
+    }
+
+    void resetLLIncoming() {
+      llscTracker.resetLLIncoming();
+    }
+
+    bool isLLIncomingWithAddr(Addr a, unsigned sn = 0) {
+      return llscTracker.isLLIncomingWithAddr(a, sn);
+    }
+
+
+    void incrementCommitInsnCntForLLSCTracker() {
+      if (llscTracker.isLLSCActive()) {
+        llscTracker.incrementCommitInsnCnt();
+      }
+    }
+
+    void markLLIncoming(Addr ll, unsigned sn = 0) {
+      llscTracker.markLLIncoming(ll, sn);
+    }
+
+    bool isLLSCTrackerActive() {
+      return llscTracker.isLLSCActive();
+    }
+
+    void resetLLSCTracker() {
+      llscTracker.resetLLSCActive();
+    }
+
+    unsigned getLLSCTrackerCommitInsnObserved() {
+      return llscTracker.returnCommitInsnCnt();
+    }
+#endif
 
     bool getUseForClone() { return useForClone; }
 

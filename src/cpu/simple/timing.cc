@@ -1258,7 +1258,7 @@ TimingSimpleCPU::updateCycleCounts()
     previousCycle = curCycle();
 }
 
-void
+bool
 TimingSimpleCPU::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
 {
     for (ThreadID tid = 0; tid < cpu->numThreads; tid++) {
@@ -1294,9 +1294,10 @@ TimingSimpleCPU::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
             panic("Couldn't send TLBI_EXT_SYNC_COMP message");
         }
     }
+    return true;
 }
 
-void
+bool
 TimingSimpleCPU::DcachePort::recvFunctionalSnoop(PacketPtr pkt)
 {
     for (ThreadID tid = 0; tid < cpu->numThreads; tid++) {
@@ -1304,6 +1305,7 @@ TimingSimpleCPU::DcachePort::recvFunctionalSnoop(PacketPtr pkt)
             cpu->wakeup(tid);
         }
     }
+    return true;
 }
 
 bool

@@ -631,7 +631,19 @@ Commit::tick()
             DPRINTF(Commit,"[tid:%i] Instruction [sn:%llu] PC %s is head of"
                     " ROB and ready to commit\n",
                     tid, inst->seqNum, inst->pcState());
-
+#if defined (STARVATION_FREEDOM)
+                // Special handling for system calls (eg. ecall)
+                gem5::ThreadContext *thread = cpu->getContext(tid);
+                DPRINTF(Commit, "%s isLLSCTrackerActive %s, isSyscall %s\n", __func__,
+                                thread->isLLSCTrackerActive(), inst->staticInst->isSyscall());
+                if (thread->isLLSCTrackerActive() && inst->staticInst->isSyscall()) {
+                  // This means that the number of committed instructions observed
+                  // has gone past 16. Send a signal to the memory to unblock the LL it is holding
+                  DPRINTF(Commit, "%s: Informing LLSC reservation invalidate\n", __func__);
+                  iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
+                  thread->resetLLSCTracker();
+                }
+#endif
         } else if (!rob->isEmpty(tid)) {
             const DynInstPtr &inst = rob->readHeadInst(tid);
 
@@ -944,15 +956,13 @@ Commit::commitInsts()
         ThreadID tid = head_inst->threadNumber;
 
         assert(tid == commit_thread);
-
         DPRINTF(Commit,
-                "Trying to commit head instruction, [tid:%i] [sn:%llu]\n",
-                tid, head_inst->seqNum);
+                "Trying to commit head instruction, [tid:%i] [sn:%llu] %s, %s\n",
+                tid, head_inst->seqNum, head_inst->staticInst->isLoadLocked(), head_inst->staticInst->isStoreConditional());
 
         // If the head instruction is squashed, it is ready to retire
         // (be removed from the ROB) at any time.
         if (head_inst->isSquashed()) {
-
             DPRINTF(Commit, "Retiring squashed instruction from "
                     "ROB.\n");
 
@@ -1088,6 +1098,48 @@ Commit::commitInsts()
                 if (!interrupt && avoidQuiesceLiveLock &&
                     onInstBoundary && cpu->checkInterrupts(0))
                     squashAfter(tid, head_inst);
+#if defined (STARVATION_FREEDOM)
+                gem5::ThreadContext *thread = cpu->getContext(tid);
+                unsigned cbeCountLimit = thread->getSystemPtr()->getCBECountLimit();
+                DPRINTF(Commit, "%s: Incrementing commit insn count for LLSC tracker %d, limit: %d\n",
+                                __func__, thread->getLLSCTrackerCommitInsnObserved(), cbeCountLimit);
+                thread->incrementCommitInsnCntForLLSCTracker();
+
+                DPRINTF(Commit, "%s isLLSCTrackerActive %s, isSyscall %s\n", __func__,
+                                thread->isLLSCTrackerActive(), head_inst->staticInst->isSyscall());
+
+                DPRINTF(Commit, "%s: isLoadLocked %s, PC: %x, LLSCTracker %s, incomingLLPC: %x\n",
+                                __func__, head_inst->staticInst->isLoadLocked(),
+                                head_inst->pcState().instAddr(), thread->isLLSCTrackerActive(),
+                                thread->getIncomingLLAddr());
+                if (head_inst->staticInst->isLoadLocked()) {
+                  DPRINTF(Commit, "%s: Activating LLSC tracker on PC: %x on commit\n", __func__, head_inst->pcState().instAddr());
+                  thread->activateLLSCTracker(head_inst->pcState().instAddr());
+                }
+                /*
+                // [ANIRUDH] Perhaps put the tracker activation here....
+                if (head_inst->staticInst->isLoadLocked() &&
+                    thread->isLLIncomingWithAddr(head_inst->pcState().instAddr()) &&
+                    !thread->isLLSCTrackerActive()) {
+                  // This means we are committing a LL instruction but we did not mark it
+                  // active when we received the data in the LSQ unit..., so mark the tracker active
+                  // here
+                  DPRINTF(Commit, "%s: Activating LLSC tracker on PC: %x on commit\n", __func__, head_inst->pcState().instAddr());
+                  thread->activateLLSCTracker(head_inst->pcState().instAddr());
+                  thread->resetLLIncoming();
+                }
+                */
+                if ((thread->getLLSCTrackerCommitInsnObserved() > cbeCountLimit) ||
+                    (thread->isLLSCTrackerActive() && head_inst->staticInst->isSyscall()) ||
+                    (head_inst->staticInst->isStoreConditional())
+                   ) {
+                  // This means that the number of committed instructions observed
+                  // has gone past 16. Send a signal to the memory to unblock the LL it is holding
+                  DPRINTF(Commit, "%s: Informing LLSC reservation invalidate\n", __func__);
+                  iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
+                  thread->resetLLSCTracker();
+                }
+#endif
             } else {
                 DPRINTF(Commit, "Unable to commit head instruction PC:%s "
                         "[tid:%i] [sn:%llu].\n",

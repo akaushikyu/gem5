@@ -219,7 +219,7 @@ class TraceCPU : public ClockedObject
          *
          * @param pkt Pointer to packet received
          */
-        void recvTimingSnoopReq(PacketPtr pkt) {}
+        bool recvTimingSnoopReq(PacketPtr pkt) { return true; }
 
         /**
          * Handle a retry signalled by the cache if instruction read failed in
@@ -259,14 +259,14 @@ class TraceCPU : public ClockedObject
          *
          * @param pkt Pointer to packet received
          */
-        void recvTimingSnoopReq(PacketPtr pkt) {}
+        bool recvTimingSnoopReq(PacketPtr pkt) { return true; }
 
         /**
          * Required functionally but do nothing.
          *
          * @param pkt Pointer to packet received
          */
-        void recvFunctionalSnoop(PacketPtr pkt) {}
+        bool recvFunctionalSnoop(PacketPtr pkt) { return true; }
 
         /**
          * Handle a retry signalled by the cache if data access failed in the

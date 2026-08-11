@@ -311,6 +311,9 @@ class System : public SimObject, public PCEventScope
      */
     Addr cacheLineSize() const { return _cacheLineSize; }
 
+    uint64_t getTBECycleLimit() const { return _tbe_cycle_limit; }
+    uint64_t getCBECountLimit() const { return _cbe_insn_cnt_limit; }
+
     Threads threads;
 
     const bool multiThread;
@@ -413,6 +416,9 @@ class System : public SimObject, public PCEventScope
     enums::MemoryMode memoryMode;
 
     const Addr _cacheLineSize;
+
+    uint64_t _tbe_cycle_limit;
+    uint64_t _cbe_insn_cnt_limit;
 
     uint64_t workItemsBegin = 0;
     uint64_t workItemsEnd = 0;

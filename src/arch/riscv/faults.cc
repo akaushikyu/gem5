@@ -156,6 +156,7 @@ RiscvFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 
         // Clear load reservation address
         auto isa = static_cast<RiscvISA::ISA*>(tc->getIsaPtr());
+        DPRINTF(Faults, "%s clearing load reservation for cid: %d\n", __func__, tc->contextId());
         isa->clearLoadReservation(tc->contextId());
 
         // Set PC to fault handler address

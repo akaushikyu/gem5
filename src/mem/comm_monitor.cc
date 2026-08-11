@@ -95,10 +95,10 @@ CommMonitor::recvFunctional(PacketPtr pkt)
     memSidePort.sendFunctional(pkt);
 }
 
-void
+bool
 CommMonitor::recvFunctionalSnoop(PacketPtr pkt)
 {
-    cpuSidePort.sendFunctionalSnoop(pkt);
+    return cpuSidePort.sendFunctionalSnoop(pkt);
 }
 
 CommMonitor::MonitorStats::MonitorStats(statistics::Group *parent,
@@ -471,10 +471,10 @@ CommMonitor::recvTimingResp(PacketPtr pkt)
     return successful;
 }
 
-void
+bool
 CommMonitor::recvTimingSnoopReq(PacketPtr pkt)
 {
-    cpuSidePort.sendTimingSnoopReq(pkt);
+    return cpuSidePort.sendTimingSnoopReq(pkt);
 }
 
 bool

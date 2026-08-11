@@ -91,6 +91,7 @@ LSQUnit::WritebackEvent::description() const
 bool
 LSQUnit::recvTimingResp(PacketPtr pkt)
 {
+    DPRINTF(LSQUnit, "%s: Recv timing response for pkt: %s\n", __func__, pkt->print());
     LSQRequest *request = dynamic_cast<LSQRequest*>(pkt->senderState);
     assert(request != nullptr);
     bool ret = true;
@@ -165,6 +166,10 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
     assert(!cpu->switchedOut());
     if (!inst->isSquashed()) {
         if (request->needWBToRegister()) {
+            DPRINTF(LSQUnit, "%s: inst is LL %s, is SC %s, pk %s\n",
+                             __func__, inst->staticInst->isLoadLocked(),
+                             inst->staticInst->isStoreConditional(),
+                             pkt->print());
             // Only loads, store conditionals and atomics perform the writeback
             // after receving the response from the memory
             assert(inst->isLoad() || inst->isStoreConditional() ||
@@ -181,6 +186,22 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
                 request->writebackDone();
                 completeStore(request->instruction()->sqIt);
             }
+            /*
+#if defined (STARVATION_FREEDOM)
+            gem5::ThreadContext *thread = cpu->getContext(cpu->contextToThread(
+                                    request->contextId()));
+            if (inst->staticInst->isLoadLocked()) {
+              DPRINTF(LSQUnit, "%s: Found LL instruction %s \n", __func__, pkt->print());
+              DPRINTF(LSQUnit, "%s: Activating LLSC tracker \n", __func__);
+              thread->activateLLSCTracker(pkt->req->getPC());
+            } else if (inst->staticInst->isStoreConditional()) {
+              DPRINTF(LSQUnit, "%s: Found SC instruction &s \n", __func__, pkt->print());
+              DPRINTF(LSQUnit, "%s: Deactivating LLSC tracker %d \n", __func__,
+                            thread->getLLSCTrackerCommitInsnObserved());
+              thread->resetLLSCTracker();
+            }
+#endif
+            */
         } else if (inst->isStore()) {
             // This is a regular store (i.e., not store conditionals and
             // atomics), so it can complete without writing back
@@ -270,11 +291,20 @@ LSQUnit::LSQUnitStats::LSQUnitStats(statistics::Group *parent)
                "Number of times an access to memory failed due to the cache "
                "being blocked"),
       ADD_STAT(loadToUse, "Distribution of cycle latency between the "
-                "first time a load is issued and its completion")
+                "first time a load is issued and its completion"),
+      ADD_STAT(LLIssued, statistics::units::Count::get(),
+               "Number of LL issued"),
+      ADD_STAT(SCIssued, statistics::units::Count::get(),
+               "Number of SC issued"),
+      ADD_STAT(SCFailed, statistics::units::Count::get(),
+               "Number of SC failed")
 {
     loadToUse
         .init(0, 299, 10)
         .flags(statistics::nozero);
+    LLIssued.flags(statistics::total);
+    SCIssued.flags(statistics::total);
+    SCFailed.flags(statistics::total);
 }
 
 void
@@ -867,6 +897,8 @@ LSQUnit::writebackStores()
             inst->recordResult(false);
             bool success = inst->tcBase()->getIsaPtr()->handleLockedWrite(
                     inst.get(), request->mainReq(), cacheBlockMask);
+            stats.SCIssued++;
+            if (!success) stats.SCFailed++;
             inst->recordResult(true);
             request->packetSent();
 
@@ -930,7 +962,18 @@ LSQUnit::squash(const InstSeqNum &squashed_num)
                 "[sn:%lli]\n",
                 loadQueue.back().instruction()->pcState(),
                 loadQueue.back().instruction()->seqNum);
-
+#if defined (STARVATION_FREEDOM)
+        gem5::ThreadContext *thread = cpu->getContext(lsqID);
+        if (thread->isLLIncomingWithAddr(
+          loadQueue.back().instruction()->pcState().instAddr(),
+          loadQueue.back().instruction()->seqNum)) {
+          // This is squashed....
+          DPRINTF(LSQUnit, "%s: Marking LL as squashed and informing reservation %x %d\n", __func__,
+                  loadQueue.back().instruction()->pcState().instAddr(), loadQueue.back().instruction()->seqNum);
+          informLLSCReservationInvalidate();
+          thread->resetLLSCTracker();
+        }
+#endif
         if (isStalled() && loadQueue.tail() == stallingLoadIdx) {
             stalled = false;
             stallingStoreIsn = 0;
@@ -1230,12 +1273,34 @@ LSQUnit::trySendPacket(bool isLoad, PacketPtr data_pkt)
         }
         request->packetNotSent();
     }
+#if defined (STARVATION_FREEDOM)
+    // if we see a load locked request, then just mark it here in the thread LLSC tracker
+    gem5::ThreadContext *thread = cpu->getContext(lsqID);
+    if (data_pkt->isLL()) {
+      DPRINTF(LSQUnit, "%s: Marking LL incoming on pkt addr: %x %x %d %s\n", __func__,
+                        data_pkt->getBlockAddr(64),
+                        data_pkt->req->getPC(),
+                        request->instruction()->seqNum,
+                        data_pkt->print());
+      thread->markLLIncoming(data_pkt->req->getPC(), request->instruction()->seqNum);
+    }
+#endif
     DPRINTF(LSQUnit, "Memory request (pkt: %s) from inst [sn:%llu] was"
             " %ssent (cache is blocked: %d, cache_got_blocked: %d)\n",
             data_pkt->print(), request->instruction()->seqNum,
             ret ? "": "not ", lsq->cacheBlocked(), cache_got_blocked);
     return ret;
 }
+
+#if defined (STARVATION_FREEDOM)
+void
+LSQUnit::informLLSCReservationInvalidate() {
+  RequestPtr invLLSCReq = std::make_shared<Request>();
+  PacketPtr invLLSCPkt = new Packet(invLLSCReq, MemCmd::InvalidateLLSC);
+  dcachePort->sendTimingReq(invLLSCPkt);
+  return;
+}
+#endif
 
 void
 LSQUnit::startStaleTranslationFlush()
@@ -1363,6 +1428,7 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
         load_inst->recordResult(false);
         load_inst->tcBase()->getIsaPtr()->handleLockedRead(load_inst.get(),
                 request->mainReq());
+        stats.LLIssued++;
         load_inst->recordResult(true);
     }
 

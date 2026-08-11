@@ -185,7 +185,7 @@ class CoherentXBar : public BaseXBar
             return xbar.recvTimingResp(pkt, id);
         }
 
-        void
+        bool
         recvTimingSnoopReq(PacketPtr pkt) override
         {
             return xbar.recvTimingSnoopReq(pkt, id);
@@ -197,10 +197,10 @@ class CoherentXBar : public BaseXBar
             return xbar.recvAtomicSnoop(pkt, id);
         }
 
-        void
+        bool
         recvFunctionalSnoop(PacketPtr pkt) override
         {
-            xbar.recvFunctionalSnoop(pkt, id);
+            return xbar.recvFunctionalSnoop(pkt, id);
         }
 
         void recvRangeChange() override { xbar.recvRangeChange(id); }
@@ -307,7 +307,7 @@ class CoherentXBar : public BaseXBar
 
     bool recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id);
     bool recvTimingResp(PacketPtr pkt, PortID mem_side_port_id);
-    void recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id);
+    bool recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id);
     bool recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id);
     void recvReqRetry(PortID mem_side_port_id);
 
@@ -325,6 +325,11 @@ class CoherentXBar : public BaseXBar
         forwardTiming(pkt, exclude_cpu_side_port_id, snoopPorts);
     }
 
+#if defined (STARVATION_FREEDOM)
+    bool trySnoop(PacketPtr pkt, PortID exclude_cpu_side_port_id,
+                  const std::vector<QueuedResponsePort*>& dests);
+#endif
+
     /**
      * Forward a timing packet to a selected list of snoopers, potentially
      * excluding one of the connected coherent requestors to avoid sending
@@ -334,7 +339,7 @@ class CoherentXBar : public BaseXBar
      * @param exclude_cpu_side_port_id Id of CPU-side port to exclude
      * @param dests Vector of destination ports for the forwarded pkt
      */
-    void forwardTiming(PacketPtr pkt, PortID exclude_cpu_side_port_id,
+    bool forwardTiming(PacketPtr pkt, PortID exclude_cpu_side_port_id,
                        const std::vector<QueuedResponsePort*>& dests);
 
     Tick recvAtomicBackdoor(PacketPtr pkt, PortID cpu_side_port_id,
@@ -388,7 +393,7 @@ class CoherentXBar : public BaseXBar
 
     /** Function called by the port when the crossbar is receiving a functional
         snoop transaction.*/
-    void recvFunctionalSnoop(PacketPtr pkt, PortID mem_side_port_id);
+    bool recvFunctionalSnoop(PacketPtr pkt, PortID mem_side_port_id);
 
     /**
      * Forward a functional packet to our snoopers, potentially

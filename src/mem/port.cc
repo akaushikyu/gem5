@@ -72,12 +72,12 @@ class DefaultRequestPort : public RequestPort
 
     // Timing protocol.
     bool recvTimingResp(PacketPtr) override { blowUp(); }
-    void recvTimingSnoopReq(PacketPtr) override { blowUp(); }
+    bool recvTimingSnoopReq(PacketPtr) override { blowUp(); }
     void recvReqRetry() override { blowUp(); }
     void recvRetrySnoopResp() override { blowUp(); }
 
     // Functional protocol.
-    void recvFunctionalSnoop(PacketPtr) override { blowUp(); }
+    bool recvFunctionalSnoop(PacketPtr) override { blowUp(); }
 };
 
 class DefaultResponsePort : public ResponsePort

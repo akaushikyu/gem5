@@ -1616,7 +1616,7 @@ decode QUADRANT default Unknown::unknown() {
             0x2: decode AMOFUNCT {
                 0x2: LoadReserved::lr_w({{
                     Rd_sd = Mem_sw;
-                }}, mem_flags=LLSC);
+                }}, inst_flags=IsLoadLocked, mem_flags=LLSC);
                 0x3: StoreCond::sc_w({{
                     Mem_uw = Rs2_uw;
                 }}, {{
@@ -1690,7 +1690,7 @@ decode QUADRANT default Unknown::unknown() {
                 0x1: decode AMOFUNCT {
                     0x2: LoadReserved::lr_d({{
                         Rd_sd = Mem_sd;
-                    }}, mem_flags=LLSC);
+                    }}, inst_flags=IsLoadLocked, mem_flags=LLSC);
                     0x3: StoreCond::sc_d({{
                         Mem = Rs2;
                     }}, {{

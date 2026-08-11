@@ -94,6 +94,13 @@ NoncoherentCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     return success;
 }
 
+#if defined (STARVATION_FREEDOM)
+void
+NoncoherentCache::servicePendingRequestsOnLLSCAddr() {
+  return;
+}
+#endif
+
 void
 NoncoherentCache::doWritebacks(PacketList& writebacks, Tick forward_time)
 {

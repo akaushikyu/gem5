@@ -149,6 +149,12 @@ class MemCmd
         HTMAbort,
         // Tlb shootdown
         TlbiExtSync,
+#if defined (STARVATION_FREEDOM)
+        // Request sent by core to inform
+        // cache to unblock snoop requests on
+        // active LLSC address
+        InvalidateLLSC,
+#endif
 #if defined (BESPOKE)
         // Spin lock queue commands
         EnqueueInitReq,
@@ -188,6 +194,9 @@ class MemCmd
         IsPrint,        //!< Print state matching address (for debugging)
         IsFlush,        //!< Flush the address from caches
         FromCache,      //!< Request originated from a caching agent
+#if defined (STARVATION_FREEDOM)
+        IsInvalidateLLSC,
+#endif
 #if defined (BESPOKE)
         IsEnqueueInit,
         IsEnqueueWrite,
@@ -256,6 +265,9 @@ class MemCmd
     bool isEviction() const        { return testCmdAttrib(IsEviction); }
     bool isClean() const           { return testCmdAttrib(IsClean); }
     bool fromCache() const         { return testCmdAttrib(FromCache); }
+#if defined (STARVATION_FREEDOM)
+    bool isInvalidateLLSC() const  { return testCmdAttrib(IsInvalidateLLSC); }
+#endif
 
     /**
      * A writeback is an eviction that carries data.
@@ -412,6 +424,14 @@ class Packet : public Printable, public Extensible<Packet>
 
     // Completed cycle
     Cycles completeCycle;
+#if defined (STARVATION_FREEDOM)
+    // dummy snoop check
+    bool isDummySnoopCheck = false;
+
+    bool isRetrySnoop = false;
+
+    bool isLLSCActiveSnoop = false;
+#endif
 
   private:
    /**
@@ -700,7 +720,11 @@ class Packet : public Printable, public Extensible<Packet>
     void setCacheResponding()
     {
         assert(isRequest());
+#if defined (STARVATION_FREEDOM)
+        if (!cacheResponding())
+#else
         assert(!flags.isSet(CACHE_RESPONDING));
+#endif
         flags.set(CACHE_RESPONDING);
     }
     bool cacheResponding() const { return flags.isSet(CACHE_RESPONDING); }
@@ -760,7 +784,12 @@ class Packet : public Printable, public Extensible<Packet>
     void setResponderHadWritable()
     {
         assert(cacheResponding());
+#if defined (STARVATION_FREEDOM)
+        if (!responderHadWritable())
+#else
         assert(!responderHadWritable());
+#endif
+
         flags.set(RESPONDER_HAD_WRITABLE);
     }
     bool responderHadWritable() const
@@ -1473,6 +1502,32 @@ class Packet : public Printable, public Extensible<Packet>
     {
         return cmd == MemCmd::HardPFReq || isEviction();
     }
+
+    bool
+    isSC() const {
+      return cmd == MemCmd::StoreCondReq;
+    }
+
+    bool
+    isLL() const {
+      return cmd == MemCmd::LoadLockedReq;
+    }
+#if defined (STARVATION_FREEDOM)
+    bool
+    isInvalidateLLSC() const {
+      return cmd == MemCmd::InvalidateLLSC;
+    }
+
+    bool
+    isReadExResp() const {
+      return cmd == MemCmd::ReadExResp;
+    }
+
+    bool
+    isUpgradeResp() const {
+      return cmd == MemCmd::UpgradeResp;
+    }
+#endif
 
     /**
      * Is this packet a clean eviction, including both actual clean

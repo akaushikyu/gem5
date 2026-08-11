@@ -230,8 +230,8 @@ class TimingSimpleCPU : public BaseSimpleCPU
         /** Snoop a coherence request, we need to check if this causes
          * a wakeup event on a cpu that is monitoring an address
          */
-        virtual void recvTimingSnoopReq(PacketPtr pkt);
-        virtual void recvFunctionalSnoop(PacketPtr pkt);
+        virtual bool recvTimingSnoopReq(PacketPtr pkt);
+        virtual bool recvFunctionalSnoop(PacketPtr pkt);
 
         virtual bool recvTimingResp(PacketPtr pkt);
 

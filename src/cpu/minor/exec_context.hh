@@ -113,6 +113,13 @@ class ExecContext : public gem5::ExecContext
         return execute.getLSQ().pushRequest(inst, true /* load */, nullptr,
             size, addr, flags, nullptr, nullptr, byte_enable);
     }
+#if defined (STARVATION_FREEDOM)
+    void
+    informLLSCReservationInvalidate() {
+      execute.getLSQ().informLLSCReservationInvalidate();
+      return;
+    }
+#endif
 
     Fault
     initiateMemMgmtCmd(Request::Flags flags) override

@@ -303,7 +303,7 @@ AtomicSimpleCPU::AtomicCPUDPort::recvAtomicSnoop(PacketPtr pkt)
     return 0;
 }
 
-void
+bool
 AtomicSimpleCPU::AtomicCPUDPort::recvFunctionalSnoop(PacketPtr pkt)
 {
     DPRINTF(SimpleCPU, "%s received functional snoop pkt for addr:%#x %s\n",
@@ -325,6 +325,7 @@ AtomicSimpleCPU::AtomicCPUDPort::recvFunctionalSnoop(PacketPtr pkt)
                     cacheBlockMask);
         }
     }
+    return true;
 }
 
 bool

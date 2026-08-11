@@ -74,6 +74,20 @@ LSQ::LSQRequest::LSQRequest(LSQ &port_, MinorDynInstPtr inst_, bool isLoad_,
     request = std::make_shared<Request>();
 }
 
+LSQ::LSQStats::LSQStats(MinorCPU *cpu)
+  : statistics::Group(cpu, "lsq"),
+  ADD_STAT(LLIssued, statistics::units::Count::get(),
+      "Number of LL issued"),
+  ADD_STAT(SCIssued, statistics::units::Count::get(),
+      "Number of SC issued"),
+  ADD_STAT(SCFailed, statistics::units::Count::get(),
+      "Number of failed SC")
+{
+  LLIssued.flags(statistics::total);
+  SCIssued.flags(statistics::total);
+  SCFailed.flags(statistics::total);
+}
+
 void
 LSQ::LSQRequest::tryToSuppressFault()
 {
@@ -1135,9 +1149,13 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         /* Handle LLSC requests and tests */
         if (is_load) {
             thread.getIsaPtr()->handleLockedRead(&context, request->request);
+            stats.LLIssued++;
         } else {
             do_access = thread.getIsaPtr()->handleLockedWrite(&context,
                     request->request, cacheBlockMask);
+            stats.SCIssued++;
+            if (!do_access) stats.SCFailed++;
+
 
             if (!do_access) {
                 DPRINTF(MinorMem, "Not perfoming a memory "
@@ -1169,6 +1187,15 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         moveFromRequestsToTransfers(request);
     }
 }
+#if defined (STARVATION_FREEDOM)
+void
+LSQ::informLLSCReservationInvalidate() {
+  RequestPtr invLLSCReq = std::make_shared<Request>();
+  PacketPtr invLLSCPkt = new Packet(invLLSCReq, MemCmd::InvalidateLLSC);
+  dcachePort.sendTimingReq(invLLSCPkt);
+  return;
+}
+#endif
 
 bool
 LSQ::tryToSend(LSQRequestPtr request)
@@ -1181,6 +1208,20 @@ LSQ::tryToSend(LSQRequestPtr request)
     } else {
         PacketPtr packet = request->getHeadPacket();
 
+#if defined (STARVATION_FREEDOM)
+        ThreadContext *thread = cpu.getContext(cpu.contextToThread(
+                                    request->request->contextId()));
+        if (packet->isLL()) {
+          DPRINTF(MinorMem, "%s: Found LL instruction %s\n", __func__, packet->print());
+          DPRINTF(MinorMem, "%s: Activating LLSC tracker \n", __func__);
+          thread->activateLLSCTracker(packet->req->getPC());
+        } else if (packet->isSC()) {
+          DPRINTF(MinorMem, "%s: Found SC instruction %s\n", __func__, packet->print());
+          DPRINTF(MinorMem, "%s: Deactivating LLSC tracker %d\n", __func__,
+                              thread->getLLSCTrackerCommitInsnObserved());
+          thread->resetLLSCTracker();
+        }
+#endif
         DPRINTF(MinorMem, "Trying to send request: %s addr: 0x%x\n",
             *(request->inst), packet->req->getVaddr());
 
@@ -1422,7 +1463,8 @@ LSQ::LSQ(std::string name_, std::string dcache_port_name_,
     numStoresInTransfers(0),
     numAccessesIssuedToMemory(0),
     retryRequest(NULL),
-    cacheBlockMask(~(cpu_.cacheLineSize() - 1))
+    cacheBlockMask(~(cpu_.cacheLineSize() - 1)),
+    stats(&cpu_)
 {
     if (in_memory_system_limit < 1) {
         fatal("%s: executeMaxAccessesInMemory must be >= 1 (%d)\n", name_,
@@ -1758,7 +1800,7 @@ operator <<(std::ostream &os, LSQ::MemoryState state)
     return os;
 }
 
-void
+bool
 LSQ::recvTimingSnoopReq(PacketPtr pkt)
 {
     /* LLSC operations in Minor can't be speculative and are executed from
@@ -1776,6 +1818,7 @@ LSQ::recvTimingSnoopReq(PacketPtr pkt)
                     pkt, cacheBlockMask);
         }
     }
+    return true;
 }
 
 void

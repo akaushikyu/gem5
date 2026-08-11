@@ -153,11 +153,16 @@ MemCmd::commandInfo[] =
             ReadResp, "ReadSharedReq" },
     /* LoadLockedReq: note that we use plain ReadResp as response, so that
      *                we can also use ReadRespWithInvalidate when needed */
+#if defined (STARVATION_FREEDOM)
+    { {IsRead, NeedsWritable, IsLlsc, IsRequest, IsInvalidate, NeedsResponse},
+            ReadExResp, "LoadLockedReq" },
+#else
     { {IsRead, IsLlsc, IsRequest, NeedsResponse},
             ReadResp, "LoadLockedReq" },
+#endif
     /* StoreCondReq */
     { {IsWrite, NeedsWritable, IsLlsc,
-           IsRequest, NeedsResponse, HasData},
+           IsRequest, IsInvalidate, NeedsResponse, HasData, FromCache},
             StoreCondResp, "StoreCondReq" },
     /* StoreCondFailReq: generates failing StoreCondResp */
     { {IsWrite, NeedsWritable, IsLlsc, IsRequest, NeedsResponse, HasData},
@@ -237,6 +242,10 @@ MemCmd::commandInfo[] =
     { {IsRead, IsResponse}, InvalidCmd, "HTMReqResp" },
     { {IsRead, IsRequest}, InvalidCmd, "HTMAbort" },
     { {IsRequest}, InvalidCmd, "TlbiExtSync" },
+#if defined (STARVATION_FREEDOM)
+    // InvalidateLLSC
+    { {IsRequest}, InvalidCmd, "InvalidateLLSC" },
+#endif
 #if defined (BESPOKE)
     /* EnqueueInit */
     { {IsEnqueueInit, NeedsWritable, IsRequest, NeedsResponse, HasData},

@@ -101,7 +101,7 @@ MemDelay::RequestPort::recvTimingResp(PacketPtr pkt)
     return true;
 }
 
-void
+bool
 MemDelay::RequestPort::recvFunctionalSnoop(PacketPtr pkt)
 {
     if (parent.trySatisfyFunctional(pkt)) {
@@ -109,6 +109,7 @@ MemDelay::RequestPort::recvFunctionalSnoop(PacketPtr pkt)
     } else {
         parent.responsePort.sendFunctionalSnoop(pkt);
     }
+    return true;
 }
 
 Tick
@@ -119,10 +120,10 @@ MemDelay::RequestPort::recvAtomicSnoop(PacketPtr pkt)
     return delay + parent.responsePort.sendAtomicSnoop(pkt);
 }
 
-void
+bool
 MemDelay::RequestPort::recvTimingSnoopReq(PacketPtr pkt)
 {
-    parent.responsePort.sendTimingSnoopReq(pkt);
+    return parent.responsePort.sendTimingSnoopReq(pkt);
 }
 
 

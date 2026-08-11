@@ -98,12 +98,13 @@ class LSQ
          * completing the load or store that has returned from
          * memory. */
         virtual bool recvTimingResp(PacketPtr pkt);
-        virtual void recvTimingSnoopReq(PacketPtr pkt);
+        virtual bool recvTimingSnoopReq(PacketPtr pkt);
 
-        virtual void
+        virtual bool
         recvFunctionalSnoop(PacketPtr pkt)
         {
             // @todo: Is there a need for potential invalidation here?
+          return true;
         }
 
         /** Handles doing a retry of the previous send. */
@@ -261,6 +262,10 @@ class LSQ
 
       protected:
         LSQUnit* lsqUnit() { return &_port; }
+#if defined (STARVATION_FREEDOM)
+        // Create a placeholder LSQRequest
+        LSQRequest(LSQUnit* port);
+#endif
         LSQRequest(LSQUnit* port, const DynInstPtr& inst, bool isLoad);
         LSQRequest(LSQUnit* port, const DynInstPtr& inst, bool isLoad,
                 const Addr& addr, const uint32_t& size,
@@ -419,6 +424,9 @@ class LSQ
         /** @} */
         virtual bool recvTimingResp(PacketPtr pkt) = 0;
         virtual void sendPacketToCache() = 0;
+#if defined (STARVATION_FREEDOM)
+        virtual void informLLSCReservationInvalidate() = 0;
+#endif
         virtual void buildPackets() = 0;
 
         /**
@@ -569,6 +577,10 @@ class LSQ
     class SingleDataRequest : public LSQRequest
     {
       public:
+#if defined (STARVATION_FREEDOM)
+        SingleDataRequest(LSQUnit* port) :
+          LSQRequest(port) {}
+#endif
         SingleDataRequest(LSQUnit* port, const DynInstPtr& inst,
                 bool isLoad, const Addr& addr, const uint32_t& size,
                 const Request::Flags& flags_, PacketDataPtr data=nullptr,
@@ -583,6 +595,9 @@ class LSQ
                 gem5::ThreadContext* tc, BaseMMU::Mode mode);
         virtual bool recvTimingResp(PacketPtr pkt);
         virtual void sendPacketToCache();
+#if defined (STARVATION_FREEDOM)
+        virtual void informLLSCReservationInvalidate();
+#endif
         virtual void buildPackets();
         virtual Cycles handleLocalAccess(
                 gem5::ThreadContext *thread, PacketPtr pkt);
@@ -602,6 +617,9 @@ class LSQ
         inline virtual ~UnsquashableDirectRequest() {}
         virtual void initiateTranslation();
         virtual void markAsStaleTranslation();
+#if defined (STARVATION_FREEDOM)
+        virtual void informLLSCReservationInvalidate();
+#endif
         virtual void finish(const Fault &fault, const RequestPtr &req,
                 gem5::ThreadContext* tc, BaseMMU::Mode mode);
         virtual std::string
@@ -649,8 +667,10 @@ class LSQ
         virtual bool recvTimingResp(PacketPtr pkt);
         virtual void initiateTranslation();
         virtual void sendPacketToCache();
+#if defined (STARVATION_FREEDOM)
+        virtual void informLLSCReservationInvalidate();
+#endif
         virtual void buildPackets();
-
         virtual Cycles handleLocalAccess(
                 gem5::ThreadContext *thread, PacketPtr pkt);
         virtual bool isCacheBlockHit(Addr blockAddr, Addr cacheBlockMask);
@@ -669,6 +689,9 @@ class LSQ
     /** Sets the pointer to the list of active threads. */
     void setActiveThreads(std::list<ThreadID> *at_ptr);
 
+#if defined (STARVATION_FREEDOM)
+    void informLLSCReservationInvalidate(unsigned tid);
+#endif
     /** Perform sanity checks after a drain. */
     void drainSanityCheck() const;
     /** Has the LSQ drained? */
@@ -867,7 +890,7 @@ class LSQ
      */
     bool recvTimingResp(PacketPtr pkt);
 
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     Fault pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
                       unsigned int size, Addr addr, Request::Flags flags,

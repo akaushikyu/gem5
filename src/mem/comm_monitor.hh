@@ -129,9 +129,9 @@ class CommMonitor : public SimObject
 
       protected:
 
-        void recvFunctionalSnoop(PacketPtr pkt)
+        bool recvFunctionalSnoop(PacketPtr pkt)
         {
-            mon.recvFunctionalSnoop(pkt);
+            return mon.recvFunctionalSnoop(pkt);
         }
 
         Tick recvAtomicSnoop(PacketPtr pkt)
@@ -144,9 +144,9 @@ class CommMonitor : public SimObject
             return mon.recvTimingResp(pkt);
         }
 
-        void recvTimingSnoopReq(PacketPtr pkt)
+        bool recvTimingSnoopReq(PacketPtr pkt)
         {
-            mon.recvTimingSnoopReq(pkt);
+            return mon.recvTimingSnoopReq(pkt);
         }
 
         void recvRangeChange()
@@ -241,7 +241,7 @@ class CommMonitor : public SimObject
 
     void recvFunctional(PacketPtr pkt);
 
-    void recvFunctionalSnoop(PacketPtr pkt);
+    bool recvFunctionalSnoop(PacketPtr pkt);
 
     Tick recvAtomic(PacketPtr pkt);
 
@@ -251,7 +251,7 @@ class CommMonitor : public SimObject
 
     bool recvTimingResp(PacketPtr pkt);
 
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     bool recvTimingSnoopResp(PacketPtr pkt);
 

@@ -200,6 +200,8 @@ system = System(
     mem_mode=test_mem_mode,
     mem_ranges=[AddrRange(args.mem_size)],
     cache_line_size=args.cacheline_size,
+    tbe_cycle_limit=args.tbe_cycle_limit,
+    cbe_insn_count_limit=args.cbe_insn_count_limit
 )
 
 if numThreads > 1:

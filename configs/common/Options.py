@@ -750,6 +750,17 @@ def addSEOptions(parser):
         "host fs",
     )
 
+    if buildEnv["USE_RISCV_ISA"]:
+        parser.add_argument("--tbe-cycle-limit",
+                            type=int,
+                            #default=(-1 & 0xFFFFFFFF),
+                            default=(200),
+        )
+        parser.add_argument("--cbe-insn-count-limit",
+                            type=int,
+                            default=(-1 & 0xFFFFFFFF),
+        )
+
     parser.add_argument(
         "--redirects",
         action="append",
@@ -808,6 +819,18 @@ def addFSOptions(parser):
             help="Specifies device tree blob file to use with device-tree-"
             "enabled kernels",
         )
+
+    if buildEnv["USE_RISCV_ISA"]:
+        parser.add_argument("--tbe-cycle-limit",
+                            type=int,
+                            #default=(-1 & 0xFFFFFFFF),
+                            default=(200),
+        )
+        parser.add_argument("--cbe-insn-count-limit",
+                            type=int,
+                            default=(-1 & 0xFFFFFFFF),
+        )
+
     if buildEnv["USE_ARM_ISA"]:
         parser.add_argument(
             "--list-machine-types",

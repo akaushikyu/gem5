@@ -208,7 +208,6 @@ BaseXBar::Layer<SrcType, DstType>::tryTiming(SrcType* src_port)
     }
 
     state = BUSY;
-
     return true;
 }
 
@@ -237,6 +236,22 @@ BaseXBar::Layer<SrcType, DstType>::failedTiming(SrcType* src_port,
     // failed in forwarding and should track that we are now waiting
     // for the peer to send a retry
     waitingForPeer = src_port;
+    // we should have gone from idle or retry to busy in the tryTiming
+    // test
+    assert(state == BUSY);
+
+    // occupy the bus accordingly
+    occupyLayer(busy_time);
+}
+
+#if defined (STARVATION_FREEDOM)
+template <typename SrcType, typename DstType>
+void
+BaseXBar::Layer<SrcType, DstType>::failedSnoop(Tick busy_time)
+{
+    // ensure no one got in between and tried to send something to
+    // this port
+    assert(waitingForPeer == NULL);
 
     // we should have gone from idle or retry to busy in the tryTiming
     // test
@@ -245,6 +260,7 @@ BaseXBar::Layer<SrcType, DstType>::failedTiming(SrcType* src_port,
     // occupy the bus accordingly
     occupyLayer(busy_time);
 }
+#endif
 
 template <typename SrcType, typename DstType>
 void
@@ -261,8 +277,9 @@ BaseXBar::Layer<SrcType, DstType>::releaseLayer()
     if (!waitingForLayer.empty()) {
         // there is no point in sending a retry if someone is still
         // waiting for the peer
-        if (waitingForPeer == NULL)
+        if (waitingForPeer == NULL) {
             retryWaiting();
+        }
     } else if (waitingForPeer == NULL && drainState() == DrainState::Draining) {
         DPRINTF(Drain, "Crossbar done draining, signaling drain manager\n");
         //If we weren't able to drain before, do it now.

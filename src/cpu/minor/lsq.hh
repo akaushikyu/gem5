@@ -111,10 +111,10 @@ class LSQ : public Named
 
         bool isSnooping() const override { return true; }
 
-        void recvTimingSnoopReq(PacketPtr pkt) override
+        bool recvTimingSnoopReq(PacketPtr pkt) override
         { return lsq.recvTimingSnoopReq(pkt); }
 
-        void recvFunctionalSnoop(PacketPtr pkt) override { }
+        bool recvFunctionalSnoop(PacketPtr pkt) override { return true; }
     };
 
     DcachePort dcachePort;
@@ -644,6 +644,14 @@ class LSQ : public Named
     /** Snoop other threads monitors on memory system accesses */
     void threadSnoop(LSQRequestPtr request);
 
+    struct LSQStats : public statistics::Group {
+      LSQStats(MinorCPU *cpu);
+      /** Stats */
+      statistics::Scalar LLIssued;
+      statistics::Scalar SCIssued;
+      statistics::Scalar SCFailed;
+    } stats;
+
   public:
     LSQ(std::string name_, std::string dcache_port_name_,
         MinorCPU &cpu_, Execute &execute_,
@@ -682,6 +690,9 @@ class LSQ : public Named
 
     /** A store has been committed, please move it to the store buffer */
     void sendStoreToStoreBuffer(LSQRequestPtr request);
+#if defined (STARVATION_FREEDOM)
+    void informLLSCReservationInvalidate();
+#endif
 
     /** Are there any accesses other than normal cached loads in the
      *  memory system or having received responses which need to be
@@ -725,7 +736,7 @@ class LSQ : public Named
     /** Memory interface */
     bool recvTimingResp(PacketPtr pkt);
     void recvReqRetry();
-    void recvTimingSnoopReq(PacketPtr pkt);
+    bool recvTimingSnoopReq(PacketPtr pkt);
 
     /** Return the raw-bindable port */
     MinorCPU::MinorCPUPort &getDcachePort() { return dcachePort; }

@@ -306,13 +306,14 @@ class RequestPort: public Port, public AtomicRequestProtocol,
         return 0;
     }
 
-    void
+    bool
     recvFunctionalSnoop(PacketPtr pkt) override
     {
         panic("%s was not expecting a functional snoop request\n", name());
+        return true;
     }
 
-    void
+    bool
     recvTimingSnoopReq(PacketPtr pkt) override
     {
         panic("%s was not expecting a timing snoop request.\n", name());
@@ -426,11 +427,15 @@ class ResponsePort : public Port, public AtomicResponseProtocol,
      *
      * @param pkt Snoop packet to send.
      */
-    void
+    bool
     sendFunctionalSnoop(PacketPtr pkt) const
     {
         try {
-            FunctionalResponseProtocol::sendSnoop(_requestPort, pkt);
+            _requestPort->removeTrace(pkt);
+            bool succ = FunctionalResponseProtocol::sendSnoop(_requestPort, pkt);
+            if (!succ)
+              _requestPort->addTrace(pkt);
+            return succ;
         } catch (UnboundPortException) {
             reportUnbound();
         }
@@ -471,11 +476,15 @@ class ResponsePort : public Port, public AtomicResponseProtocol,
      *
      * @param pkt Packet to send.
      */
-    void
+    bool
     sendTimingSnoopReq(PacketPtr pkt)
     {
         try {
-            TimingResponseProtocol::sendSnoopReq(_requestPort, pkt);
+            _requestPort->removeTrace(pkt);
+            bool succ = TimingResponseProtocol::sendSnoopReq(_requestPort, pkt);
+            if (!succ)
+              _requestPort->addTrace(pkt);
+            return succ;
         } catch (UnboundPortException) {
             reportUnbound();
         }

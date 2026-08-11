@@ -928,9 +928,20 @@ ISA::handleLockedSnoop(PacketPtr pkt, Addr cacheBlockMask)
     if (load_reservation_addr == INVALID_RESERVATION_ADDR)
         return;
     Addr snoop_addr = pkt->getAddr() & cacheBlockMask;
+#if defined (STARVATION_FREEDOM)
+    DPRINTF(LLSC, "Pkt is LLSCActiveSnoop %s\n", pkt->isLLSCActiveSnoop);
+#endif
     DPRINTF(LLSC, "Locked snoop on address %x.\n", snoop_addr);
-    if ((load_reservation_addr & cacheBlockMask) == snoop_addr)
-        load_reservation_addr = INVALID_RESERVATION_ADDR;
+    if ((load_reservation_addr & cacheBlockMask) == snoop_addr
+#if defined (STARVATION_FREEDOM)
+         // do not modify the reservation address state if this is
+         // an active snoop
+         && !pkt->isLLSCActiveSnoop
+#endif
+        ) {
+      DPRINTF(LLSC, "%s Marking reservation addr invalid: %x\n", __func__, load_reservation_addr);
+      load_reservation_addr = INVALID_RESERVATION_ADDR;
+    }
 }
 
 
@@ -976,7 +987,13 @@ ISA::handleLockedWrite(const RequestPtr &req, Addr cacheBlockMask)
         }
 
         // Must clear any reservations
+        DPRINTF(LLSC, "%s Marking reservation addr invalid: %x\n", __func__, load_reservation_addr);
+        DPRINTF(LLSC, "[cid:%d]: SC failure! Current locked addr = %x.\n",
+            req->contextId(), load_reservation_addr & cacheBlockMask);
         load_reservation_addr = INVALID_RESERVATION_ADDR;
+#if defined (STARVATION_FREEDOM)
+         panic("SC failure -- violating starvation freedom guarantee...");
+#endif
 
         return false;
     }
@@ -985,10 +1002,12 @@ ISA::handleLockedWrite(const RequestPtr &req, Addr cacheBlockMask)
     }
 
     // Must clear any reservations
-    load_reservation_addr = INVALID_RESERVATION_ADDR;
-
+    DPRINTF(LLSC, "%s Marking reservation addr invalid: %x\n", __func__, load_reservation_addr);
     DPRINTF(LLSC, "[cid:%d]: SC success! Current locked addr = %x.\n",
             req->contextId(), load_reservation_addr & cacheBlockMask);
+    load_reservation_addr = INVALID_RESERVATION_ADDR;
+    DPRINTF(LLSC, "%s: [cid: %d]: New load reservation address: %x\n", \
+                  __func__, req->contextId(), load_reservation_addrs[tc->contextId()]);
     return true;
 }
 
@@ -997,6 +1016,7 @@ ISA::globalClearExclusive()
 {
     tc->getCpuPtr()->wakeup(tc->threadId());
     Addr& load_reservation_addr = load_reservation_addrs[tc->contextId()];
+    DPRINTF(LLSC, "%s: Clearing reservation addresses %x\n", __func__, load_reservation_addr);
     load_reservation_addr = INVALID_RESERVATION_ADDR;
 }
 

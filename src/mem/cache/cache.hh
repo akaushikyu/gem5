@@ -104,7 +104,7 @@ class Cache : public BaseCache
     void serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt,
                             CacheBlk *blk) override;
 
-    void recvTimingSnoopReq(PacketPtr pkt) override;
+    bool recvTimingSnoopReq(PacketPtr pkt) override;
 
     void recvTimingSnoopResp(PacketPtr pkt) override;
 
@@ -121,6 +121,11 @@ class Cache : public BaseCache
 
     void doTimingSupplyResponse(PacketPtr req_pkt, const uint8_t *blk_data,
                                 bool already_copied, bool pending_inval);
+
+#if defined (STARVATION_FREEDOM)
+    void servicePendingSnoopRequest(PacketPtr pendingPkt, CacheBlk* blk);
+    void servicePendingRequestsOnLLSCAddr() override;
+#endif
 
     /**
      * Perform an upward snoop if needed, and update the block state

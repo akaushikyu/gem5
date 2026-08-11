@@ -108,9 +108,9 @@ class MemTest : public ClockedObject
 
         bool recvTimingResp(PacketPtr pkt);
 
-        void recvTimingSnoopReq(PacketPtr pkt) { }
+        bool recvTimingSnoopReq(PacketPtr pkt) { return true; }
 
-        void recvFunctionalSnoop(PacketPtr pkt) { }
+        bool recvFunctionalSnoop(PacketPtr pkt) { return true; }
 
         Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
 

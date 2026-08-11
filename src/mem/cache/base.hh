@@ -231,13 +231,13 @@ class BaseCache : public ClockedObject
 
       protected:
 
-        virtual void recvTimingSnoopReq(PacketPtr pkt);
+        virtual bool recvTimingSnoopReq(PacketPtr pkt);
 
         virtual bool recvTimingResp(PacketPtr pkt);
 
         virtual Tick recvAtomicSnoop(PacketPtr pkt);
 
-        virtual void recvFunctionalSnoop(PacketPtr pkt);
+        virtual bool recvFunctionalSnoop(PacketPtr pkt);
 
       public:
 
@@ -571,7 +571,7 @@ class BaseCache : public ClockedObject
      * Snoops bus transactions to maintain coherence.
      * @param pkt The current bus transaction.
      */
-    virtual void recvTimingSnoopReq(PacketPtr pkt) = 0;
+    virtual bool recvTimingSnoopReq(PacketPtr pkt) = 0;
 
     /**
      * Handle a snoop response.
@@ -646,6 +646,10 @@ class BaseCache : public ClockedObject
      * Insert writebacks into the write buffer
      */
     virtual void doWritebacks(PacketList& writebacks, Tick forward_time) = 0;
+
+#if defined (STARVATION_FREEDOM)
+    virtual void servicePendingRequestsOnLLSCAddr() = 0;
+#endif
 
     /**
      * Send writebacks down the memory hierarchy in atomic mode
@@ -990,6 +994,156 @@ class BaseCache : public ClockedObject
   public:
     /** System we are currently operating in. */
     System *system;
+
+#if defined (STARVATION_FREEDOM)
+    struct LLSCTracker {
+      enum State {
+        INIT = 0,
+        // ll_issued means the core has created a ll request but
+        // not sent it out
+        LL_ISSUED,
+        // ll_dispatched means the core as sent the ll request
+        // and waiting for response
+        LL_DISPATCH,
+        LL_RESP_RECVD,
+        SC_DISPATCH,
+        SC_COMPLETE,
+        NUM_STATES
+      };
+      // Address of LL/SC
+      Addr addr;
+      // Cycle when LL was observed
+      // this is for timer-based environment (TBE)
+      Cycles LLCycle;
+      // TODO: Other execution environments
+      // IBE -- Instruction based environment
+      // CBE -- Counter based environment
+      State state;
+
+      // whether LL is reissued
+      bool reissue;
+      // whether LL is squashed
+      bool squashed;
+
+      bool isActiveOtherReqPending;
+      bool isActiveExclReqPending;
+      std::vector<PacketPtr> pendingList;
+      PacketPtr pendingPkt;
+
+      LLSCTracker()
+        :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT), reissue(false),
+        squashed(false), isActiveOtherReqPending(false), isActiveExclReqPending(false), pendingPkt(NULL) { }
+
+      std::string stringifyState(State state) {
+        switch(state) {
+          case State::INIT:
+            return "LLSCTracker::State::Init";
+          case State::LL_ISSUED:
+            return "LLSCtracker::State::LL_ISSUED (LL issued but not dispatched)";
+          case State::LL_DISPATCH:
+            return "LLSCTracker::State::LL_DISPATCH (LL dispatched)";
+          case State::LL_RESP_RECVD:
+            return "LLSCTracker::State::LL_RESP_RECVD (LL responses received)";
+          case State::SC_DISPATCH:
+            return "LLSCTracker::State::SC_DISPATCH (SC dispatched)";
+          case State::SC_COMPLETE:
+            return "LLSCTracker::State::SC_COMPLETE (SC complete)";
+          default:
+            return "Invalid state";
+        }
+      }
+
+      void setStateToLLIssued(bool isDiffLL = false) {
+        if (state == State::INIT) {
+          // irrespective of reissue flag, set state to LL_ISSUED
+          reissue = false;
+        } else {
+          reissue = !isDiffLL;
+        }
+        state = State::LL_ISSUED;
+      }
+
+      void setLLSquashed() { squashed = true; }
+
+      void setStateToLLDispatch() { state = State::LL_DISPATCH; }
+      void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
+      void setStateToSCDispatch() { state = State::SC_DISPATCH; }
+      void setStateToSCComplete() { state = State::SC_COMPLETE; }
+      void resetState() { state = State::INIT; squashed = false; }
+      void markNoPendingReq() { isActiveOtherReqPending = false; \
+                                isActiveExclReqPending = false; \
+                                pendingList.clear(); }
+
+      std::string getLLStateString() { return stringifyState(state); }
+      bool markPendingReq(PacketPtr pending) {
+        if (!isActiveExclReqPending) {
+          PacketPtr pp = new Packet(pending, false, true);
+          pendingList.push_back(pp);
+          isActiveOtherReqPending = true;
+          if (pending->needsWritable()) {
+            isActiveExclReqPending = true;
+          }
+          return true;
+        }
+        // This means the core has already observed another core's
+        // excl request and some other core will be responsible for
+        // sending to this requestor
+        return false;
+      }
+
+      bool isDifferentLL(Addr LLaddr) {
+        return (addr != LLaddr);
+      }
+
+      bool checkAndReset_TBE(Cycles currCycle, uint64_t tbeCycleLimit) {
+        if (!isActive())
+          return false;
+        // if there is an active LL, check the current tick
+        // and determine whether to unset the active LL and allow
+        // for snoops
+        // TODO: Make TBE cycle count a command line parameter
+        if (currCycle - LLCycle > Cycles(tbeCycleLimit)) {
+          resetState();
+          return true;
+        }
+        return false;
+      }
+
+      void setLLCycle(Cycles _curCycle) {
+        // only set the LL cycle if this is **not** reissued LL
+        if (!reissue)
+          LLCycle = _curCycle;
+      }
+
+      void recordLLAddr(Addr _addr) {
+        addr = _addr;
+      }
+
+      bool isActivePending() { return isActiveOtherReqPending; }
+      bool isSquashed() { return squashed; }
+      bool isActive() { return (
+                                state == State::LL_ISSUED ||
+                                state == State::LL_DISPATCH ||
+                                state == State::LL_RESP_RECVD ||
+                                state == State::SC_DISPATCH); }
+      bool isActiveAndOrdered() { return (
+                                state == State::LL_DISPATCH ||
+                                state == State::LL_RESP_RECVD ||
+                                state == State::SC_DISPATCH); }
+      bool isActiveAndData() { return (state == State::LL_RESP_RECVD ||
+                                       state == State::SC_DISPATCH); }
+      bool isMatchAddr(Addr incoming) { return ((addr == incoming)); }
+      Cycles getLLCycle() { return LLCycle; }
+      Addr getLLSCAddr() { return addr; }
+      bool isLLSCActiveWithData() { return (state == State::LL_RESP_RECVD ||
+                                            state == State::SC_DISPATCH); }
+      PacketPtr getPendingPkt() { return pendingPkt; }
+      std::vector<PacketPtr>& getPendingPktList() { return pendingList; }
+    };
+
+
+    LLSCTracker llscTrack;
+#endif
 
     struct CacheCmdStats : public statistics::Group
     {

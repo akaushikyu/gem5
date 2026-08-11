@@ -126,6 +126,15 @@ LSQ::name() const
     return iewStage->name() + ".lsq";
 }
 
+#if defined (STARVATION_FREEDOM)
+void
+LSQ::informLLSCReservationInvalidate(unsigned tid) {
+  Request::Flags flags;
+  LSQRequest* request = new SingleDataRequest(&thread[tid]);
+  request->informLLSCReservationInvalidate();
+}
+#endif
+
 void
 LSQ::setActiveThreads(std::list<ThreadID> *at_ptr)
 {
@@ -440,7 +449,7 @@ LSQ::recvTimingResp(PacketPtr pkt)
     return true;
 }
 
-void
+bool
 LSQ::recvTimingSnoopReq(PacketPtr pkt)
 {
     DPRINTF(LSQ, "received pkt for addr:%#x %s\n", pkt->getAddr(),
@@ -467,6 +476,7 @@ LSQ::recvTimingSnoopReq(PacketPtr pkt)
         // In case no units have pending ops, just go ahead
         checkStaleTranslations();
     }
+    return true;
 }
 
 int
@@ -1049,6 +1059,17 @@ LSQ::SplitDataRequest::initiateTranslation()
     }
 }
 
+#if defined (STARVATION_FREEDOM)
+LSQ::LSQRequest::LSQRequest(LSQUnit *port):
+  _state(State::NotIssued),
+  _port(*port), _inst(nullptr), _data(nullptr),
+  _res(nullptr), _addr(0), _size(0), _flags(0),
+  _numOutstandingPackets(0), _amo_op(nullptr)
+{
+  flags.set(Flag::IsLoad, true);
+}
+#endif
+
 LSQ::LSQRequest::LSQRequest(
         LSQUnit *port, const DynInstPtr& inst, bool isLoad) :
     _state(State::NotIssued),
@@ -1338,6 +1359,22 @@ LSQ::SplitDataRequest::sendPacketToCache()
     }
 }
 
+#if defined (STARVATION_FREEDOM)
+void
+LSQ::SingleDataRequest::informLLSCReservationInvalidate() {
+  lsqUnit()->informLLSCReservationInvalidate();
+}
+
+void
+LSQ::SplitDataRequest::informLLSCReservationInvalidate() {
+  lsqUnit()->informLLSCReservationInvalidate();
+}
+
+void LSQ::UnsquashableDirectRequest::informLLSCReservationInvalidate() {
+  lsqUnit()->informLLSCReservationInvalidate();
+}
+#endif
+
 Cycles
 LSQ::SingleDataRequest::handleLocalAccess(
         gem5::ThreadContext *thread, PacketPtr pkt)
@@ -1414,7 +1451,7 @@ LSQ::DcachePort::recvTimingResp(PacketPtr pkt)
     return lsq->recvTimingResp(pkt);
 }
 
-void
+bool
 LSQ::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
 {
     for (ThreadID tid = 0; tid < cpu->numThreads; tid++) {
@@ -1422,7 +1459,7 @@ LSQ::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
             cpu->wakeup(tid);
         }
     }
-    lsq->recvTimingSnoopReq(pkt);
+    return lsq->recvTimingSnoopReq(pkt);
 }
 
 void
