@@ -101,7 +101,7 @@ parser.add_argument("--rename-to-iew-delay", type=int, default=1)
 parser.add_argument("--iew-to-commit-delay", type=int, default=1)
 
 # Starvation freedom options
-parser.add_argument("--tbe-cycle-limit", type=int, default=200)#(-1 & 0xFFFFFFFF))
+parser.add_argument("--tbe-cycle-limit", type=int, default=500)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
 
 args = parser.parse_args()

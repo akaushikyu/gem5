@@ -177,7 +177,8 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
               PacketList &writebacks)
 {
 #if defined (STARVATION_FREEDOM)
-    bool diffLLObserved = (pkt->isLL()) ? llscTrack.isDifferentLL(pkt->getBlockAddr(blkSize)) : false;
+    bool LLObserved = pkt->isLL();
+    bool diffLLObserved = (LLObserved) ? llscTrack.isDifferentLL(pkt->getBlockAddr(blkSize)) : false;
     if (llscTrack.isActiveAndData()) {
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
@@ -185,13 +186,18 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       if (diffLLObserved) {
         DPRINTF(Cache, "%s: NEW LL OBSERVED %x %x\n", __func__, pkt->getBlockAddr(blkSize), llscTrack.getLLSCAddr());
       }
-      if (reset || pkt->isInvalidateLLSC() || diffLLObserved) {
+      if (pkt->isInvalidateLLSC()) {
+        DPRINTF(Cache, "%s: Observed invalidate llsc packet\n", __func__);
+      }
+      if (reset || pkt->isInvalidateLLSC() || diffLLObserved || LLObserved) {
         /* There are three conditions we need to service pending requests:
          * 1. We timed out under TBE execution environment
          * 2. We got a invalidateLLSC signal from the core under CBE execution environment
          * 3. While the LLSCtracker is active for a LL address, we observed another LL request to
          *    a different address. In this case, we need to service pending requests for the previous
          *    active LL and then reset the state
+         * 4. We observed another LL -- could be to the same address or different one. Regardless, we
+         *    invalidate the LLSC tracker.
         */
         DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
         if (llscTrack.isActivePending()) {
@@ -217,7 +223,8 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
                      __func__, pkt->getBlockAddr(blkSize));
       llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
       DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
-      llscTrack.setStateToLLIssued(diffLLObserved);
+      //llscTrack.setStateToLLIssued(diffLLObserved);
+      llscTrack.setStateToLLIssued();
     } else if (pkt->isSC()) {
       DPRINTF(Cache, "%s: Doing SC %x\n", __func__, pkt->print());
     }
@@ -1166,7 +1173,7 @@ Cache::servicePendingRequestsOnLLSCAddr() {
                   __func__, pendingPktList.size());
   assert(!pendingPktList.empty());
   CacheBlk* blk = tags->findBlock({pendingPktList[0]->getAddr(), false});
-  bool doInvalidate = false;
+  bool doInvalidate = true; // always invalidate regardless of pending requests or not//false;
   for (auto ppkt : pendingPktList) {
     DPRINTF(Cache, "SC done and there is an active pending request %x\n", ppkt->print());
     DPRINTF(Cache, "Servicing pending snoop request\n");
@@ -1605,6 +1612,9 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
       bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
+      if (pkt->isInvalidateLLSC()) {
+        DPRINTF(Cache, "%s: Observed invalidate llsc packet\n", __func__);
+      }
       if (reset || pkt->isInvalidateLLSC()) {
         DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
         if (llscTrack.isActivePending()) {

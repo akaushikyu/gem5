@@ -60,7 +60,7 @@ parser.add_argument("--l2-size", type=str, default=None,
                           "256kB * num-cpus if unset")
 
 # Starvation freedom options
-parser.add_argument("--tbe-cycle-limit", type=int, default=200)#(-1 & 0xFFFFFFFF))
+parser.add_argument("--tbe-cycle-limit", type=int, default=1000)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
 
 args = parser.parse_args()
@@ -147,6 +147,14 @@ for cpu in system.cpu:
     cpu.clk_domain = SrcClockDomain(
         clock=args.cpu_clock, voltage_domain=VoltageDomain()
     )
+
+    cpu.decodeInputWidth = 1
+    cpu.executeInputWidth = 1
+    cpu.executeIssueLimit = 1
+    cpu.executeCommitLimit = 1
+    cpu.executeInputBufferSize = 1
+    cpu.executeLSQMaxStoreBufferStoresPerCycle = 1
+    cpu.executeLSQStoreBufferSize = 1
 
     # RISC-V needs no PIC wiring beyond this call, but each core needs
     # its own interrupt controller

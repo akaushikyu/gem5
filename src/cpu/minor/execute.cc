@@ -891,7 +891,18 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
 {
     ThreadID thread_id = inst->id.threadId;
     ThreadContext *thread = cpu.getContext(thread_id);
-
+#if defined (STARVATION_FREEDOM)
+    // For system calls, should do this before we invoke fault handler...
+    if (thread->isLLSCTrackerActive() && inst->staticInst->isSyscall()) {
+        DPRINTF(MinorExecute, "%s: Informing LLSC reservation invalidate because of sys call\n", __func__);
+        // This means that the number of committed instructions observed
+        // has gone past 16. Send a signal to the memory to unblock the LL it is holding
+        // Or we have seen a system call and must inform the LLSC reservation to invalidate...
+        ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+        context.informLLSCReservationInvalidate();
+        thread->resetLLSCTracker();
+      }
+#endif
     bool completed_inst = true;
     fault = NoFault;
 

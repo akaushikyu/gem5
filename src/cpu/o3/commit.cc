@@ -963,21 +963,6 @@ Commit::commitInsts()
         // If the head instruction is squashed, it is ready to retire
         // (be removed from the ROB) at any time.
         if (head_inst->isSquashed()) {
-          /*
-#if defined (STARVATION_FREEDOM)
-          // if a LL is squashed, then we need to inform the memory
-          // about it..
-          if (head_inst->staticInst->isLoadLocked()) {
-            gem5::ThreadContext *thread = cpu->getContext(tid);
-            if (thread->isLLSCTrackerActive()) {
-              // disable the tracker and let the memory know...
-              DPRINTF(Commit, "%s: Informing LLSC reservation invalidate as LL is squashed\n", __func__);
-              iewStage->ldstQueue.informLLSCReservationInvalidate(tid);
-              thread->resetLLSCTracker();
-            }
-          }
-#endif
-          */
             DPRINTF(Commit, "Retiring squashed instruction from "
                     "ROB.\n");
 

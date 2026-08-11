@@ -11,7 +11,7 @@ for num_cpus in 2 4 8; do
 
           python scripts/rv-sf-scripts/visualize-riscv-lrsc.py --num-cpus $num_cpus --ee-type $ee_type \
             --code-type $code_type --core-type $core_type --cache-levels $cache_levels \
-            -o heatmap-figures/heatmap_${num_cpus}_${ee_type}_${code_type}_${core_type}_${cache_levels}.png $1
+            -o $1/heatmap_${num_cpus}_${ee_type}_${code_type}_${core_type}_${cache_levels}.png $2
         done
       done
     done

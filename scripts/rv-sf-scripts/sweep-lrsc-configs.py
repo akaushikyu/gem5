@@ -52,17 +52,16 @@ WORKLOAD_DIR = "rv-sf-workloads"
 OUTPUT_DIR = "riscv-lrsc-exp"
 
 CACHE_CONFIGS = [
-    ("minor-one-level", "configs/riscv-sf-experiments/riscv_minor_one_level_cache.py"),
+    #("minor-one-level", "configs/riscv-sf-experiments/riscv_minor_one_level_cache.py"),
     ("minor-two-level", "configs/riscv-sf-experiments/riscv_minor_two_level_cache.py"),
-    ("o3-one-level", "configs/riscv-sf-experiments/riscv_single_issue_o3_one_level_cache.py"),
+    #("o3-one-level", "configs/riscv-sf-experiments/riscv_single_issue_o3_one_level_cache.py"),
     ("o3-two-level", "configs/riscv-sf-experiments/riscv_single_issue_o3_two_level_cache.py"),
 ]
 
 # ----------------------------------------------------------------------
 # Sweep axes (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-CPUS = [8, 4, 2]
-#CPUS = [4]
+CPUS = [8, 4]
 INSN_BETWEEN = [1, 2, 3, 4]
 
 UNCOND_CBE = [1, 4, 8, 12, 16, 20, 50, 80, 100, 150]
@@ -281,7 +280,7 @@ def main():
 
     jobs = (
         build_unconditional_jobs() +
-        build_conditional_jobs(retry=False) +
+        #build_conditional_jobs(retry=False) +
         build_conditional_jobs(retry=True)
     )
 

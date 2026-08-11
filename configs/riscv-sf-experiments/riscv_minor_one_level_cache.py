@@ -52,7 +52,7 @@ parser.add_argument("--mem-size", type=str, default="512MB")
 parser.add_argument("--num-cpus", type=int, default=1,
                      help="Number of MinorCPU cores")
 # Starvation freedom options
-parser.add_argument("--tbe-cycle-limit", type=int, default=200)#(-1 & 0xFFFFFFFF))
+parser.add_argument("--tbe-cycle-limit", type=int, default=500)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
 
 args = parser.parse_args()
