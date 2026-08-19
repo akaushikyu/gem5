@@ -345,7 +345,22 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
         /* Invoke memory faults. */
         DPRINTF(MinorMem, "Completing fault from DTLB access: %s\n",
             inst->translationFault->name());
-
+#if defined (STARVATION_FREEDOM)
+        // Handle SC with 0 destination
+        if (inst->staticInst->isStoreConditional()) {
+          RegId r0 = RegId(inst->staticInst->destRegIdx(0).regClass(), static_cast<RegIndex>(0));
+          if (inst->staticInst->destRegIdx(0) == r0) {
+            DPRINTF(MinorExecute, "%s: Found SC with x0 as destination register", __func__);
+            /* Don't assign to fault */
+            // Rather, inform the LLSC
+            ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+            context.informLLSCReservationInvalidate();
+            thread->resetLLSCTracker();
+          }
+        }
+        else
+#endif
+        {
         if (inst->staticInst->isPrefetch()) {
             DPRINTF(MinorMem, "Not taking fault on prefetch: %s\n",
                 inst->translationFault->name());
@@ -356,6 +371,7 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
             fault = inst->translationFault;
 
             fault->invoke(thread, inst->staticInst);
+        }
         }
     } else if (!packet) {
         DPRINTF(MinorMem, "Completing failed request inst: %s\n",
@@ -466,6 +482,22 @@ Execute::executeMemRefInst(MinorDynInstPtr inst, BranchData &branch,
         ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
 
         DPRINTF(MinorExecute, "Initiating memRef inst: %s\n", *inst);
+#if defined (STARVATION_FREEDOM)
+        if (inst->staticInst->isStoreConditional()) {
+          RegId r0 = RegId(inst->staticInst->destRegIdx(0).regClass(), static_cast<RegIndex>(0));
+          if (inst->staticInst->destRegIdx(0) == r0) {
+            DPRINTF(MinorExecute, "%s: Found SC with x0 as destination register", __func__);
+            /*
+            ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+            context.informLLSCReservationInvalidate();
+            thread->resetLLSCTracker();
+            thread->pcState(*old_pc);
+            // return issued
+            return true;
+            */
+          }
+        }
+#endif
 
         Fault init_fault = inst->staticInst->initiateAcc(&context,
             inst->traceData);
@@ -1034,7 +1066,6 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
         }
     }
 
-    // here
 #if defined (STARVATION_FREEDOM)
     if (completed_inst) {
       DPRINTF(MinorExecute, "committing instruction: %s\n", *inst, inst->staticInst->isAtomic());

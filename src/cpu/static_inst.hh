@@ -163,6 +163,7 @@ class StaticInst : public RefCounted, public StaticInstFlags
     bool isCall()         const { return flags[IsCall]; }
     bool isReturn()       const { return flags[IsReturn]; }
     bool isDirectCtrl()   const { return flags[IsDirectControl]; }
+    bool isSpecialControl() const { return flags[IsSpecialControl]; }
     bool isIndirectCtrl() const { return flags[IsIndirectControl]; }
     bool isCondCtrl()     const { return flags[IsCondControl]; }
     bool isUncondCtrl()   const { return flags[IsUncondControl]; }

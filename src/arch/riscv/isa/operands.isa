@@ -61,6 +61,7 @@ let {{
 def operands {{
 #General Purpose Integer Reg Operands
     'Rd': IntReg('ud', 'RD', 'IsInteger', 1),
+    'SRd': IntReg('ud', 'SRD', 'IsInteger', 1),
     'Rs1': IntReg('ud', 'RS1', 'IsInteger', 2),
     'Rs2': IntReg('ud', 'RS2', 'IsInteger', 3),
     'Rt': IntReg('ud', 'AMOTempReg', 'IsInteger', 4),

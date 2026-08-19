@@ -189,7 +189,7 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       if (pkt->isInvalidateLLSC()) {
         DPRINTF(Cache, "%s: Observed invalidate llsc packet\n", __func__);
       }
-      if (reset || pkt->isInvalidateLLSC() || diffLLObserved || LLObserved) {
+      if (reset || pkt->isInvalidateLLSC() || diffLLObserved) {
         /* There are three conditions we need to service pending requests:
          * 1. We timed out under TBE execution environment
          * 2. We got a invalidateLLSC signal from the core under CBE execution environment
@@ -223,8 +223,7 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
                      __func__, pkt->getBlockAddr(blkSize));
       llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
       DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
-      //llscTrack.setStateToLLIssued(diffLLObserved);
-      llscTrack.setStateToLLIssued();
+      llscTrack.setStateToLLIssued(diffLLObserved);
     } else if (pkt->isSC()) {
       DPRINTF(Cache, "%s: Doing SC %x\n", __func__, pkt->print());
     }
@@ -1173,7 +1172,7 @@ Cache::servicePendingRequestsOnLLSCAddr() {
                   __func__, pendingPktList.size());
   assert(!pendingPktList.empty());
   CacheBlk* blk = tags->findBlock({pendingPktList[0]->getAddr(), false});
-  bool doInvalidate = true; // always invalidate regardless of pending requests or not//false;
+  bool doInvalidate = false;
   for (auto ppkt : pendingPktList) {
     DPRINTF(Cache, "SC done and there is an active pending request %x\n", ppkt->print());
     DPRINTF(Cache, "Servicing pending snoop request\n");
