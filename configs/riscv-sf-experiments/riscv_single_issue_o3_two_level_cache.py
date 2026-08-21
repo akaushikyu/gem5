@@ -105,6 +105,9 @@ parser.add_argument("--iew-to-commit-delay", type=int, default=1)
 parser.add_argument("--tbe-cycle-limit", type=int, default=500)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
 
+parser.add_argument("--dcache-mshrs", type=int, default=4,
+                    help="L1 MSHRS")
+
 args = parser.parse_args()
 
 
@@ -230,7 +233,7 @@ for cpu in system.cpu:
 
 # ---- Private L1 caches (one pair per core) -------------------------------
 system.cpu_icache = [L1ICache() for _ in range(num_cpus)]
-system.cpu_dcache = [L1DCache() for _ in range(num_cpus)]
+system.cpu_dcache = [L1DCache(mshrs=args.dcache_mshrs) for _ in range(num_cpus)]
 
 for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache):
     icache.connectCPU(cpu)
@@ -262,7 +265,7 @@ else:
     # 3, 5, 6...).
     l2_size = f"{256 * _next_pow2(num_cpus)}kB"
 
-system.l2cache = L2Cache(size=l2_size)
+system.l2cache = L2Cache(size=l2_size,mshrs=40)
 system.l2cache.connectCPUSideBus(system.l2bus)
 
 # ---- Main (system) memory bus ---------------------------------------------

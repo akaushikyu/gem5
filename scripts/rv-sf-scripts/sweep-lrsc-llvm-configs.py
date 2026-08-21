@@ -37,21 +37,19 @@ import shutil
 import subprocess
 import sys
 from multiprocessing import Process, Queue
-from datetime import datetime
 
 from tqdm import tqdm
 
 # ----------------------------------------------------------------------
 # Paths / binaries (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc.py"
-COMPILE_SCRIPT = "./scripts/rv-sf-scripts/compile.sh"
+GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc_llvm.py"
+COMPILE_SCRIPT = "./scripts/rv-sf-scripts/compile_llvm.sh"
 GEM5_SF = "./build/RISCV_NoRuby_SF/gem5.fast"
 GEM5_NOSF = "./build/RISCV_NoRuby_NoSF/gem5.fast"
 
-now = datetime.now()
-WORKLOAD_DIR = "rv-sf-workloads"# + now.strftime("%Y%m%d")
-OUTPUT_DIR = "riscv-lrsc-exp"# + now.strftime("%Y%m%d")
+WORKLOAD_DIR = "rv-sf-llvm-workloads"
+OUTPUT_DIR = "riscv-lrsc-exp"
 
 CACHE_CONFIGS = [
     #("minor-one-level", "configs/riscv-sf-experiments/riscv_minor_one_level_cache.py"),
@@ -63,8 +61,7 @@ CACHE_CONFIGS = [
 # ----------------------------------------------------------------------
 # Sweep axes (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-#CPUS = [8, 4]
-CPUS = [8]
+CPUS = [8, 4]
 INSN_BETWEEN = [1, 2, 3, 4]
 
 UNCOND_CBE = [1, 4, 8, 12, 16, 20, 50, 80, 100, 150]
@@ -77,7 +74,6 @@ COND_NORETRY_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
 # NOTE: sweep.sh's conditional-retry tbe list has a duplicated "10 10",
 # kept as-is here for a faithful port (harmless - just runs that value twice).
 COND_RETRY_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
-
 
 # ----------------------------------------------------------------------
 # Workload + simulation command builders
@@ -297,11 +293,11 @@ def main():
     run_batches(compile_cmds, args.num_cpus, args.dry_run, desc="Compile")
 
     # --- Phase 2: run every gem5 simulation ----------------------------
-    sim_cmds = [sim for job in jobs for sim in job["sims"]]
-    run_batches(sim_cmds, args.num_cpus, args.dry_run, desc="Simulations")
+    #sim_cmds = [sim for job in jobs for sim in job["sims"]]
+    #run_batches(sim_cmds, args.num_cpus, args.dry_run, desc="Simulations")
 
-    print(f"Done. {len(sim_cmds)} simulations across {len(jobs)} workloads "
-          f"using {args.num_cpus} host cores.")
+    #print(f"Done. {len(sim_cmds)} simulations across {len(jobs)} workloads "
+    #      f"using {args.num_cpus} host cores.")
 
 if __name__ == "__main__":
     main()

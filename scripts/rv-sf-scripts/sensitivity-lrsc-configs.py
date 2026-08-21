@@ -37,7 +37,6 @@ import shutil
 import subprocess
 import sys
 from multiprocessing import Process, Queue
-from datetime import datetime
 
 from tqdm import tqdm
 
@@ -49,35 +48,31 @@ COMPILE_SCRIPT = "./scripts/rv-sf-scripts/compile.sh"
 GEM5_SF = "./build/RISCV_NoRuby_SF/gem5.fast"
 GEM5_NOSF = "./build/RISCV_NoRuby_NoSF/gem5.fast"
 
-now = datetime.now()
-WORKLOAD_DIR = "rv-sf-workloads"# + now.strftime("%Y%m%d")
-OUTPUT_DIR = "riscv-lrsc-exp"# + now.strftime("%Y%m%d")
+WORKLOAD_DIR = "sensitivity-rv-sf-workloads"
+OUTPUT_DIR = "sensitivity-riscv-lrsc-exp"
 
 CACHE_CONFIGS = [
-    #("minor-one-level", "configs/riscv-sf-experiments/riscv_minor_one_level_cache.py"),
     ("minor-two-level", "configs/riscv-sf-experiments/riscv_minor_two_level_cache.py"),
-    #("o3-one-level", "configs/riscv-sf-experiments/riscv_single_issue_o3_one_level_cache.py"),
     ("o3-two-level", "configs/riscv-sf-experiments/riscv_single_issue_o3_two_level_cache.py"),
 ]
 
 # ----------------------------------------------------------------------
 # Sweep axes (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-#CPUS = [8, 4]
-CPUS = [8]
-INSN_BETWEEN = [1, 2, 3, 4]
+CPUS = [8, 4]
+INSN_BETWEEN = [4]
 
 UNCOND_CBE = [1, 4, 8, 12, 16, 20, 50, 80, 100, 150]
 UNCOND_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
 
-COND_EXIT_PATH = [1, 2, 4, 8, 12, 16, 20, 50]
 COND_RETRY_PATH = [1, 2, 4, 8, 12, 16, 20, 50]
 COND_CBE = [1, 4, 8, 12, 16, 20, 50, 100, 150]
-COND_NORETRY_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
-# NOTE: sweep.sh's conditional-retry tbe list has a duplicated "10 10",
-# kept as-is here for a faithful port (harmless - just runs that value twice).
-COND_RETRY_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
+COND_TBE = [1, 2, 4, 8, 10, 20, 50, 80, 100, 150, 200, 300]
 
+# Sensitivity vectors
+ROB_SIZE = [64, 128, 192, 256]
+MSHR_SIZE = [1, 2, 4, 8, 12, 16] 
+SQ_SIZE = [2, 4, 8, 12, 16]
 
 # ----------------------------------------------------------------------
 # Workload + simulation command builders
@@ -109,25 +104,77 @@ def build_unconditional_jobs():
             sims = []
             for cbe in UNCOND_CBE:
                 for name, config in CACHE_CONFIGS:
-                    outdir = os.path.join(
-                        OUTPUT_DIR,
-                        f"SF-uc-bb-{insn_between}-{name}-cbe-{cbe}-num-cpus-{cpu}")
-                    sims.append((gem5_cmd(GEM5_SF, outdir, config,
-                                           ["--cbe-insn-count-limit", str(cbe)],
+                    for mshr in MSHR_SIZE:
+                        outdir = os.path.join(
+                            OUTPUT_DIR,
+                            f"SF-uc-bb-{insn_between}-{name}-cbe-{cbe}-num-cpus-{cpu}-l1mshr-{mshr}")
+                        sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                           ["--cbe-insn-count-limit", str(cbe), "--dcache-mshrs", str(mshr)],
                                            sim_cpu, cmd_cpp), outdir))
+                    if (name == "o3-two-level"):
+                        for rob in ROB_SIZE:
+                            outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"SF-uc-bb-{insn_between}-{name}-cbe-{cbe}-num-cpus-{cpu}-rob-{rob}")
+                            sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                           ["--cbe-insn-count-limit", str(cbe), "--rob-size", str(rob)],
+                                           sim_cpu, cmd_cpp), outdir))
+                    for sq in SQ_SIZE:
+                        outdir = os.path.join(
+                            OUTPUT_DIR,
+                            f"SF-uc-bb-{insn_between}-{name}-cbe-{cbe}-num-cpus-{cpu}-sq-{sq}")
+                        sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                        ["--cbe-insn-count-limit", str(cbe), "--sq-entries", str(sq)],
+                                        sim_cpu, cmd_cpp), outdir))
+
             for tbe in UNCOND_TBE:
                 for name, config in CACHE_CONFIGS:
+                    for mshr in MSHR_SIZE:
+                        outdir = os.path.join(
+                            OUTPUT_DIR,
+                            f"SF-uc-bb-{insn_between}-{name}-tbe-{tbe}-num-cpus-{cpu}-l1mshr-{mshr}")
+                        sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                           ["--tbe-cycle-limit", str(tbe), "--dcache-mshrs", str(mshr)],
+                                           sim_cpu, cmd_cpp), outdir))
+                    if (name == "o3-two-level"):
+                        for rob in ROB_SIZE:
+                            outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"SF-uc-bb-{insn_between}-{name}-tbe-{tbe}-num-cpus-{cpu}-rob-{rob}")
+                            sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                           ["--tbe-cycle-limit", str(tbe), "--rob-size", str(rob)],
+                                           sim_cpu, cmd_cpp), outdir))
+                    for sq in SQ_SIZE:
+                        outdir = os.path.join(
+                            OUTPUT_DIR,
+                            f"SF-uc-bb-{insn_between}-{name}-tbe-{tbe}-num-cpus-{cpu}-sq-{sq}")
+                        sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                        ["--tbe-cycle-limit", str(tbe), "--sq-entries", str(sq)],
+                                        sim_cpu, cmd_cpp), outdir))
+
+            for name, config in CACHE_CONFIGS:
+                for mshr in MSHR_SIZE:
                     outdir = os.path.join(
                         OUTPUT_DIR,
-                        f"SF-uc-bb-{insn_between}-{name}-tbe-{tbe}-num-cpus-{cpu}")
-                    sims.append((gem5_cmd(GEM5_SF, outdir, config,
-                                           ["--tbe-cycle-limit", str(tbe)],
-                                           sim_cpu, cmd_cpp), outdir))
-            for name, config in CACHE_CONFIGS:
-                outdir = os.path.join(
-                    OUTPUT_DIR, f"NOSF-uc-bb-{insn_between}-{name}-num-cpus-{cpu}")
-                sims.append((gem5_cmd(GEM5_NOSF, outdir, config, [],
-                                       sim_cpu, cmd_cpp), outdir))
+                        f"NOSF-uc-bb-{insn_between}-{name}-num-cpus-{cpu}-l1mshr-{mshr}")
+                    sims.append((gem5_cmd(GEM5_NOSF, outdir, config,
+                                        ["--dcache-mshrs", str(mshr)],
+                                        sim_cpu, cmd_cpp), outdir))
+                if (name == "o3-two-level"):
+                    for rob in ROB_SIZE:
+                        outdir = os.path.join(
+                            OUTPUT_DIR,
+                            f"NOSF-uc-bb-{insn_between}-{name}-num-cpus-{cpu}-rob-{rob}")
+                        sims.append((gem5_cmd(GEM5_NOSF, outdir, config,
+                                        ["--rob-size", str(rob)],
+                                        sim_cpu, cmd_cpp), outdir))
+                for sq in SQ_SIZE:
+                    outdir = os.path.join(
+                        OUTPUT_DIR,
+                        f"NOSF-uc-bb-{insn_between}-{name}-num-cpus-{cpu}-sq-{sq}")
+                    sims.append((gem5_cmd(GEM5_NOSF, outdir, config,
+                                    ["--sq-entries", str(sq)],
+                                    sim_cpu, cmd_cpp), outdir))
 
             jobs.append({"gen_cmd": gen_cmd, "compile_cmd": compile_cmd, "sims": sims})
     return jobs
@@ -137,8 +184,7 @@ def build_conditional_jobs(retry: bool):
     """retry=False -> conditional-no-retry (lr-fail-action exit)
        retry=True  -> conditional-retry   (lr-fail-action retry)"""
     jobs = []
-    path_values = COND_RETRY_PATH if retry else COND_EXIT_PATH
-    tbe_values = COND_RETRY_TBE if retry else COND_NORETRY_TBE
+    path_values = COND_RETRY_PATH
     tag = "cr" if retry else "cnr"
     path_flag_char = "r" if retry else "e"  # rb-/eb- prefix in dir names
     lr_fail_action = "retry" if retry else "exit"
@@ -162,29 +208,88 @@ def build_conditional_jobs(retry: bool):
                 sims = []
                 for cbe in COND_CBE:
                     for name, config in CACHE_CONFIGS:
-                        outdir = os.path.join(
-                            OUTPUT_DIR,
-                            f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
-                            f"-{name}-cbe-{cbe}-num-cpus-{cpu}")
-                        sims.append((gem5_cmd(GEM5_SF, outdir, config,
-                                               ["--cbe-insn-count-limit", str(cbe)],
-                                               sim_cpu, cmd_cpp), outdir))
-                for tbe in tbe_values:
+                        for mshr in MSHR_SIZE:
+                            outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                f"-{name}-cbe-{cbe}-num-cpus-{cpu}-l1mshr-{mshr}")
+                            sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                            ["--cbe-insn-count-limit", str(cbe),"--dcache-mshrs", str(mshr)],
+                                            sim_cpu, cmd_cpp), outdir))
+                        if (name == "o3-two-level"):
+                            for rob in ROB_SIZE:
+                                outdir = os.path.join(
+                                    OUTPUT_DIR,
+                                    f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                    f"-{name}-cbe-{cbe}-num-cpus-{cpu}-rob-{rob}")
+                                sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                        ["--cbe-insn-count-limit", str(cbe), "--rob-size", str(rob)],
+                                        sim_cpu, cmd_cpp), outdir))
+                        for sq in SQ_SIZE:
+                                outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                f"-{name}-cbe-{cbe}-num-cpus-{cpu}-sq-{sq}")
+                                sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                        ["--cbe-insn-count-limit", str(cbe), "--sq-entries", str(sq)],
+                                        sim_cpu, cmd_cpp), outdir))
+
+                for tbe in COND_TBE:
                     for name, config in CACHE_CONFIGS:
+                        for mshr in MSHR_SIZE:
+                            outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                f"-{name}-tbe-{tbe}-num-cpus-{cpu}-l1mshr-{mshr}")
+                            sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                           ["--tbe-cycle-limit", str(tbe),"--dcache-mshrs", str(mshr)],
+                                           sim_cpu, cmd_cpp), outdir))
+                        if (name == "o3-two-level"):
+                            for rob in ROB_SIZE:
+                                outdir = os.path.join(
+                                    OUTPUT_DIR,
+                                    f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                    f"-{name}-tbe-{tbe}-num-cpus-{cpu}-rob-{rob}")
+
+                                sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                           ["--tbe-cycle-limit", str(tbe),"--rob-size", str(rob)],
+                                           sim_cpu, cmd_cpp), outdir))
+                        for sq in SQ_SIZE:
+                            outdir = os.path.join(
+                                    OUTPUT_DIR,
+                                    f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                    f"-{name}-tbe-{tbe}-num-cpus-{cpu}-sq-{sq}")
+
+                            sims.append((gem5_cmd(GEM5_SF, outdir, config,
+                                        ["--tbe-cycle-limit", str(tbe), "--sq-entries", str(sq)],
+                                        sim_cpu, cmd_cpp), outdir))
+
+                for name, config in CACHE_CONFIGS:
+                    for mshr in MSHR_SIZE:
+                        outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"NOSF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                f"-{name}-num-cpus-{cpu}-l1mshr-{mshr}")
+                        sims.append((gem5_cmd(GEM5_NOSF, outdir, config,
+                                           ["--dcache-mshrs", str(mshr)],
+                                           sim_cpu, cmd_cpp), outdir))
+                    if (name == "o3-two-level"):
+                        for rob in ROB_SIZE:
+                            outdir = os.path.join(
+                                OUTPUT_DIR,
+                                f"NOSF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                                f"-{name}-num-cpus-{cpu}-rob-{rob}")
+                            sims.append((gem5_cmd(GEM5_NOSF, outdir, config,
+                                           ["--rob-size", str(rob)],
+                                           sim_cpu, cmd_cpp), outdir))
+                    for sq in SQ_SIZE:
                         outdir = os.path.join(
                             OUTPUT_DIR,
-                            f"SF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
-                            f"-{name}-tbe-{tbe}-num-cpus-{cpu}")
-                        sims.append((gem5_cmd(GEM5_SF, outdir, config,
-                                               ["--tbe-cycle-limit", str(tbe)],
-                                               sim_cpu, cmd_cpp), outdir))
-                for name, config in CACHE_CONFIGS:
-                    outdir = os.path.join(
-                        OUTPUT_DIR,
-                        f"NOSF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
-                        f"-{name}-num-cpus-{cpu}")
-                    sims.append((gem5_cmd(GEM5_NOSF, outdir, config, [],
-                                           sim_cpu, cmd_cpp), outdir))
+                            f"NOSF-{tag}-bb-{insn_between}-{path_flag_char}b-{path_val}"
+                            f"-{name}-num-cpus-{cpu}-sq-{sq}")
+                        sims.append((gem5_cmd(GEM5_NOSF, outdir, config,
+                                        ["--sq-entries", str(sq)],
+                                        sim_cpu, cmd_cpp), outdir))
 
                 jobs.append({"gen_cmd": gen_cmd, "compile_cmd": compile_cmd, "sims": sims})
     return jobs
