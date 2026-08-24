@@ -186,22 +186,6 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
                 request->writebackDone();
                 completeStore(request->instruction()->sqIt);
             }
-            /*
-#if defined (STARVATION_FREEDOM)
-            gem5::ThreadContext *thread = cpu->getContext(cpu->contextToThread(
-                                    request->contextId()));
-            if (inst->staticInst->isLoadLocked()) {
-              DPRINTF(LSQUnit, "%s: Found LL instruction %s \n", __func__, pkt->print());
-              DPRINTF(LSQUnit, "%s: Activating LLSC tracker \n", __func__);
-              thread->activateLLSCTracker(pkt->req->getPC());
-            } else if (inst->staticInst->isStoreConditional()) {
-              DPRINTF(LSQUnit, "%s: Found SC instruction &s \n", __func__, pkt->print());
-              DPRINTF(LSQUnit, "%s: Deactivating LLSC tracker %d \n", __func__,
-                            thread->getLLSCTrackerCommitInsnObserved());
-              thread->resetLLSCTracker();
-            }
-#endif
-            */
         } else if (inst->isStore()) {
             // This is a regular store (i.e., not store conditionals and
             // atomics), so it can complete without writing back
@@ -716,7 +700,6 @@ LSQUnit::executeStore(const DynInstPtr &store_inst)
     if (storeQueue[store_idx].size() == 0) {
         DPRINTF(LSQUnit,"Fault on Store PC %s, [sn:%lli], Size = 0\n",
                 store_inst->pcState(), store_inst->seqNum);
-
         if (store_inst->isAtomic()) {
             // If the instruction faulted, then we need to send it along
             // to commit without the instruction completing.
@@ -742,7 +725,6 @@ LSQUnit::executeStore(const DynInstPtr &store_inst)
     }
 
     return checkViolations(loadIt, store_inst);
-
 }
 
 void
@@ -818,6 +800,7 @@ LSQUnit::writebackBlockedStore()
 void
 LSQUnit::writebackStores()
 {
+    DPRINTF(LSQUnit, "%s: writeback stores\n", __func__);
     if (isStoreBlocked) {
         DPRINTF(LSQUnit, "Writing back  blocked store\n");
         writebackBlockedStore();

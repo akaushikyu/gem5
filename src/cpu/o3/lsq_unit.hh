@@ -162,6 +162,9 @@ class LSQUnit
          * style instructs (ARM DC ZVA; ALPHA WH64)
          */
         bool _isAllZeros = false;
+#if defined (STARVATION_FREEDOM)
+        bool _isZeroRd = false;
+#endif
 
       public:
         static constexpr size_t DataSize = sizeof(_data);
@@ -178,10 +181,17 @@ class LSQUnit
         {
             LSQEntry::clear();
             _canWB = _completed = _committed = _isAllZeros = false;
+#if defined (STARVATION_FREEDOM)
+            _isZeroRd = false;
+#endif
         }
 
         /** Member accessors. */
         /** @{ */
+#if defined (STARVATION_FREEDOM)
+        bool& isZeroRd() { return _isZeroRd; }
+        const bool& isZeroRd() const { return _isZeroRd; }
+#endif
         bool& canWB() { return _canWB; }
         const bool& canWB() const { return _canWB; }
         bool& completed() { return _completed; }

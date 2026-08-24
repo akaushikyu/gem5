@@ -1232,7 +1232,20 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
         head_inst->setCompleted();
     }
 
-    if (inst_fault != NoFault) {
+#if defined (STARVATION_FREEDOM)
+    RegId r0 = RegId(head_inst->staticInst->destRegIdx(0).regClass(), static_cast<RegIndex>(0));
+    bool IsSCZeroDest = head_inst->staticInst->isStoreConditional() &&
+                        (head_inst->staticInst->destRegIdx(0) == r0);
+    if (IsSCZeroDest) {
+        head_inst->setCompleted();
+    }
+#endif
+    // [ANIRUDH] For SC with 0 destination, skip the fault handling....
+    if (inst_fault != NoFault
+#if defined (STARVATION_FREEDOM)
+        && !IsSCZeroDest
+#endif
+    ){
         DPRINTF(Commit, "Inst [tid:%i] [sn:%llu] PC %s has a fault\n",
                 tid, head_inst->seqNum, head_inst->pcState());
 
