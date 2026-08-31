@@ -1024,15 +1024,19 @@ class BaseCache : public ClockedObject
       bool reissue;
       // whether LL is squashed
       bool squashed;
+      // whether SF is enabled
+      bool SFEnabled;
 
       bool isActiveOtherReqPending;
       bool isActiveExclReqPending;
       std::vector<PacketPtr> pendingList;
       PacketPtr pendingPkt;
+      PacketPtr shadowPktCopy;
 
       LLSCTracker()
         :addr(Addr(0)), LLCycle(Cycles(0)), state(State::INIT), reissue(false),
-        squashed(false), isActiveOtherReqPending(false), isActiveExclReqPending(false), pendingPkt(NULL) { }
+        squashed(false), SFEnabled(false), isActiveOtherReqPending(false),
+        isActiveExclReqPending(false), pendingPkt(NULL), shadowPktCopy(nullptr) {}
 
       std::string stringifyState(State state) {
         switch(state) {
@@ -1053,6 +1057,9 @@ class BaseCache : public ClockedObject
         }
       }
 
+      void setSFEnabled() { SFEnabled = true; }
+      bool isSFEnabled() { return SFEnabled; }
+
       void setStateToLLIssued(bool isDiffLL = false) {
         if (state == State::INIT) {
           // irrespective of reissue flag, set state to LL_ISSUED
@@ -1069,10 +1076,19 @@ class BaseCache : public ClockedObject
       void setStateToLLRespRecvd() { state = State::LL_RESP_RECVD; }
       void setStateToSCDispatch() { state = State::SC_DISPATCH; }
       void setStateToSCComplete() { state = State::SC_COMPLETE; }
-      void resetState() { state = State::INIT; squashed = false; }
+      void resetState() { state = State::INIT; SFEnabled = false; squashed = false; }
       void markNoPendingReq() { isActiveOtherReqPending = false; \
                                 isActiveExclReqPending = false; \
-                                pendingList.clear(); }
+                                pendingList.clear(); shadowPktCopy = nullptr;}
+      void clearShadowPktCopy() { shadowPktCopy = nullptr; }
+
+      void createPktCopy(PacketPtr _pkt) {
+        if (shadowPktCopy == nullptr) {
+          shadowPktCopy = new Packet(_pkt, false, true);
+        }
+      }
+
+      PacketPtr getShadowPktCopy() { return shadowPktCopy; }
 
       std::string getLLStateString() { return stringifyState(state); }
       bool markPendingReq(PacketPtr pending) {
@@ -1096,6 +1112,14 @@ class BaseCache : public ClockedObject
       }
 
       bool checkAndReset_TBE(Cycles currCycle, uint64_t tbeCycleLimit) {
+        if (checkTBE(currCycle, tbeCycleLimit)) {
+          resetState();
+          return true;
+        }
+        return false;
+      }
+
+      bool checkTBE(Cycles currCycle, uint64_t tbeCycleLimit) {
         if (!isActive())
           return false;
         // if there is an active LL, check the current tick
@@ -1103,7 +1127,6 @@ class BaseCache : public ClockedObject
         // for snoops
         // TODO: Make TBE cycle count a command line parameter
         if (currCycle - LLCycle > Cycles(tbeCycleLimit)) {
-          resetState();
           return true;
         }
         return false;
@@ -1121,17 +1144,30 @@ class BaseCache : public ClockedObject
 
       bool isActivePending() { return isActiveOtherReqPending; }
       bool isSquashed() { return squashed; }
-      bool isActive() { return (
-                                state == State::LL_ISSUED ||
-                                state == State::LL_DISPATCH ||
-                                state == State::LL_RESP_RECVD ||
-                                state == State::SC_DISPATCH); }
-      bool isActiveAndOrdered() { return (
-                                state == State::LL_DISPATCH ||
-                                state == State::LL_RESP_RECVD ||
-                                state == State::SC_DISPATCH); }
-      bool isActiveAndData() { return (state == State::LL_RESP_RECVD ||
-                                       state == State::SC_DISPATCH); }
+      bool isActive() {
+        if (!isSFEnabled()) return false;
+        return (
+            state == State::LL_ISSUED ||
+            state == State::LL_DISPATCH ||
+            state == State::LL_RESP_RECVD ||
+            state == State::SC_DISPATCH);
+      }
+      // [ANIRUDH] isActiveAndOrdered should check SFEnabled
+      bool isActiveAndOrdered() {
+        if (!isSFEnabled()) return false;
+        return (
+          state == State::LL_DISPATCH ||
+          state == State::LL_RESP_RECVD ||
+          state == State::SC_DISPATCH);
+      }
+
+      bool isActiveAndData() {
+        if (!isSFEnabled()) return false;
+        return (
+            state == State::LL_RESP_RECVD ||
+            state == State::SC_DISPATCH);
+      }
+
       bool isMatchAddr(Addr incoming) { return ((addr == incoming)); }
       Cycles getLLCycle() { return LLCycle; }
       Addr getLLSCAddr() { return addr; }
@@ -1140,7 +1176,6 @@ class BaseCache : public ClockedObject
       PacketPtr getPendingPkt() { return pendingPkt; }
       std::vector<PacketPtr>& getPendingPktList() { return pendingList; }
     };
-
 
     LLSCTracker llscTrack;
 #endif

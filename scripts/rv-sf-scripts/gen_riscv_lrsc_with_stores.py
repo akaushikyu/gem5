@@ -156,16 +156,16 @@ _RETRY_BLOB_INSTRS = [
     ("sub", "{a0}, {a0}, {a1}",    "arith"),
     ("xor", "{a1}, {a1}, {a0}",    "arith"),
     ("or",  "{a0}, {a0}, {a1}",    "arith"),
-    ("or",  "{a0}, {a0}, {a1}",    "arith"),
     ("lw",  "{m1}, 64({addr})",    "mem"),
-    ("add", "{a1}, {a0}, {m1}",    "chain"),
-    ("xor", "{a0}, {a1}, {m1}",    "chain"),
+    ("sw",  "{m1}, 64({addr})",    "mem"),
+    ("add", "{a0}, {a0}, {m1}",    "chain"),
+    ("xor", "{a1}, {a1}, {m1}",    "chain"),
 ]
 assert len(_RETRY_BLOB_INSTRS) == RETRY_BLOB_SIZE
 
 
 def retry_fail_blob(blob_index: int, arith0: str, arith1: str,
-                    arith2: str, addr: str, mem1: str) -> list[str]:
+                    addr: str, mem1: str) -> list[str]:
     """Return the RETRY_BLOB_SIZE asm lines for one retry-fail blob (zero-indexed).
 
     addr  : the asm operand name for the LR/SC address (e.g. '%[addr]').
@@ -174,18 +174,41 @@ def retry_fail_blob(blob_index: int, arith0: str, arith1: str,
     """
     lines = []
     for instr_idx, (mnemonic, operands, _kind) in enumerate(_RETRY_BLOB_INSTRS):
-        op = operands.format(a0=arith0, a1=arith1, a2=arith2, addr=addr, m1=mem1)
+        op = operands.format(a0=arith0, a1=arith1, addr=addr, m1=mem1)
         comment = f"  //# retry-fail blob {blob_index + 1} instr {instr_idx + 1}"
         lines.append(f'        "{mnemonic}  {op}\\n\\t"{comment}')
     return lines
 
 
 def retry_fail_blobs(count: int, arith0: str, arith1: str,
-                     arith2: str, addr: str, mem1: str) -> list[str]:
+                     addr: str, mem1: str) -> list[str]:
     """Return asm lines for *count* consecutive retry-fail blobs."""
     lines = []
     for b in range(count):
-        lines += retry_fail_blob(b, arith0, arith1, arith2, addr, mem1)
+        lines += retry_fail_blob(b, arith0, arith1, addr, mem1)
+    return lines
+
+# Number of stores issued immediately before each LR instruction.
+NUM_PRE_LR_STORES = 8
+
+# Each store targets a different cache line offset from %[addr].
+# Offsets start at 64 (one cache line past the lock word) and step by 64,
+# so the sequence covers eight distinct cache lines without touching the
+# lock word at offset 0.
+_PRE_LR_STORE_OFFSETS = [64 * (i + 1) for i in range(NUM_PRE_LR_STORES)]
+
+
+def pre_lr_stores(addr: str) -> list[str]:
+    """Return NUM_PRE_LR_STORES sw-zero lines, one per cache line offset.
+
+    addr is the asm operand name for the LR/SC address (e.g. 'addr').
+    sw uses the architectural zero register so no extra value constraint
+    is needed.
+    """
+    lines = []
+    for i, offset in enumerate(_PRE_LR_STORE_OFFSETS):
+        comment = f"  //# pre-LR store {i + 1}: addr+{offset}"
+        lines.append(f'        "sw zero, {offset}(%[{addr}])\\n\\t"{comment}')
     return lines
 
 
@@ -199,7 +222,6 @@ def build_asm_lines(
     sc_reg: str,
     arith0: str,
     arith1: str,
-    arith2: str,
     mem1: str,
     memorder: str,
 ) -> list[str]:
@@ -264,15 +286,16 @@ def build_asm_lines(
             #   - If the loaded value != 0, the retry-fail blobs execute and
             #     the LR is attempted again
             lines.append('        "lr_retry_%=:\\n\\t"')
-            lines += retry_fail_blobs(retry_fail, arith0, arith1, arith2, "%[addr]", mem1)
+            lines += retry_fail_blobs(retry_fail, arith0, arith1, "%[addr]", mem1)
             lines.append('        "retry_%=:\\n\\t"')
-            lines.append(f'        "lr.w{mo}  {reg}, (%[addr])\\n\\t"')
+            lines += pre_lr_stores("addr")
+            lines.append(f'        "lr.w  {reg}, (%[addr])\\n\\t"')
             lines.append(
                 f'        "bne {reg}, %[expected], lr_retry_%=\\n\\t"'
                 f'  //# retry LR if loaded != 0 (expected == 0)'
             )
             lines += between_blobs(between, arith0, arith1)
-            lines.append(f'        "sc.w{mo}  {sc_reg}, %[newval], (%[addr])\\n\\t"')
+            lines.append(f'        "sc.w.aqrl  {sc_reg}, %[newval], (%[addr])\\n\\t"')
             lines.append(f'        "bnez {sc_reg}, sc_fail_%=\\n\\t"')
             lines.append(f'        "sw zero, 0(%[addr])\\n\\t"'
                          f'  //# SC succeeded: reset address to 0')
@@ -286,13 +309,14 @@ def build_asm_lines(
             #   - SC writes 1 (newval) if the reservation holds
             #   - On SC success, a plain store resets the address back to 0
             lines.append('        "retry_%=:\\n\\t"')
-            lines.append(f'        "lr.w{mo}  {reg}, (%[addr])\\n\\t"')
+            lines += pre_lr_stores("addr")
+            lines.append(f'        "lr.w  {reg}, (%[addr])\\n\\t"')
             lines.append(
                 f'        "bne {reg}, %[expected], lr_cond_fail_%=\\n\\t"'
                 f'  //# exit if loaded != 0 (expected == 0)'
             )
             lines += between_blobs(between, arith0, arith1)
-            lines.append(f'        "sc.w{mo}  {sc_reg}, %[newval], (%[addr])\\n\\t"')
+            lines.append(f'        "sc.w.aqrl  {sc_reg}, %[newval], (%[addr])\\n\\t"')
             lines.append(f'        "bnez {sc_reg}, sc_fail_%=\\n\\t"')
             lines.append(f'        "sw zero, 0(%[addr])\\n\\t"'
                          f'  //# SC succeeded: reset address to 0')
@@ -303,9 +327,10 @@ def build_asm_lines(
             lines += retry_fail_blobs(retry_fail, arith0, arith1, "%[addr]", mem1)
             lines.append('        "done_%=:\\n\\t"')
     else:
-        lines.append(f'        "lr.w{mo}  {reg}, (%[addr])\\n\\t"')
+        lines += pre_lr_stores("addr")
+        lines.append(f'        "lr.w  {reg}, (%[addr])\\n\\t"')
         lines += between_blobs(between, arith0, arith1)
-        lines.append(f'        "sc.w{mo}  {sc_reg}, %[newval], (%[addr])\\n\\t"')
+        lines.append(f'        "sc.w.aqrl  {sc_reg}, %[newval], (%[addr])\\n\\t"')
 
     return lines
 
@@ -346,7 +371,6 @@ def make_lrsc_function(
     sc_reg: str,
     arith0: str,
     arith1: str,
-    arith2: str,
     mem1: str,
     memorder: str,
     iterations: int,
@@ -362,7 +386,6 @@ def make_lrsc_function(
         sc_reg=sc_reg,
         arith0=arith0,
         arith1=arith1,
-        arith2=arith2,
         mem1=mem1,
         memorder=memorder,
     )
@@ -470,6 +493,8 @@ def make_lrsc_function(
                      f" ({retry_fail * RETRY_BLOB_SIZE} instrs, blob size = {RETRY_BLOB_SIZE},"
                      f" {'before LR retry' if lr_fail_action == 'retry' else 'before done'})")
         lines.append(f"// - SC writes                               : 1 (then resets addr to 0 on success)")
+    lines.append(f"// - Pre-LR stores (before each LR)            : {NUM_PRE_LR_STORES}"
+                f" (sw zero to addr+64..addr+{64*NUM_PRE_LR_STORES}, one per cache line)")
     lines.append(f"// - Memory ordering                          : lr.w{memorder} / sc.w{memorder}")
     lines.append(f"// - LR destination register                 : {reg}")
     lines.append(f"// - SC status register                      : {sc_reg}")
@@ -617,12 +642,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
              "lw instruction in retry-fail blobs (lw/sw use addr+64). (default: t4)",
     )
     p.add_argument(
-        "--arith2",
-        default="t5",
-        metavar="REG",
-        help="Third scratch register used by the arithmetic blobs. (default: t5)",
-    )
-    p.add_argument(
         "--memorder",
         default=".aqrl",
         choices=["", ".aq", ".rl", ".aqrl"],
@@ -670,7 +689,7 @@ def validate(args: argparse.Namespace) -> None:
         errors.append("--reg and --sc-reg must be different registers")
     all_regs = {"--reg": args.reg, "--sc-reg": args.sc_reg,
                 "--arith0": args.arith0, "--arith1": args.arith1,
-                "--arith2": args.arith2, "--mem1": args.mem1}
+                "--mem1": args.mem1}
     seen: dict[str, str] = {}
     for flag, reg in all_regs.items():
         if reg in seen:
@@ -707,7 +726,6 @@ def generate(args: argparse.Namespace) -> str:
             sc_reg=args.sc_reg,
             arith0=args.arith0,
             arith1=args.arith1,
-            arith2=args.arith2,
             mem1=args.mem1,
             memorder=args.memorder,
             iterations=args.iterations,

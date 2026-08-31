@@ -20,11 +20,13 @@ def generate_multi_index_heatmap(
 
     # Create pivot table with a multi-index y-axis [bb, rb, eb]
     pivot_df = df_filtered.pivot(
-        index=["bb", "rb_str", "eb"], columns=x_param, values="normalized_simTicks"
+        #index=["bb", "rb_str", "eb"], columns=x_param, values="normalized_simTicks"
+        index=["bb", "rb_str"], columns=x_param, values="normalized_simTicks"
     )
 
     # Format multi-index tuple labels for the y-axis (bb, rb, eb)
-    pivot_df.index = [f"({bb}, {rb}, {eb})" for bb, rb, eb in pivot_df.index]
+    #pivot_df.index = [f"({bb}, {rb}, {eb})" for bb, rb, eb in pivot_df.index]
+    pivot_df.index = [f"<{bb}, {rb}>" for bb, rb in pivot_df.index]
 
     # Configure colormap reserving black for missing/unsimulated data points
     cmap = plt.cm.YlGnBu.copy()
@@ -43,14 +45,22 @@ def generate_multi_index_heatmap(
         linecolor="#222222",
     )
 
+    ax.figure.axes[-1].yaxis.label.set_size(20)
+    ax.figure.axes[-1].tick_params(labelsize=15)
+    ax.tick_params(labelsize=15)
+
+
     ax.set_title(
-        f"Normalized runtime for synthetic workloads using {x_param.upper()} configuration",
-        fontsize=13,
+        #f"Success/Fail timer configurations",
+        f"",
+        #runtime for synthetic workloads using {x_param.upper()} configuration",
+        fontsize=20,
         fontweight="bold",
         pad=12,
     )
-    ax.set_ylabel("(bb, rb, eb)", fontsize=11, fontweight="bold")
-    ax.set_xlabel(x_param, fontsize=11, fontweight="bold")
+    #ax.set_ylabel("(bb, rb, eb)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("<i,j>", fontsize=20, fontweight="bold")
+    ax.set_xlabel("Timer value", fontsize=20, fontweight="bold")
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300)
@@ -68,7 +78,7 @@ def main():
     parser.add_argument("csv_path", help="Path to csv to generate heatmap")
     args = parser.parse_args()
 
-    generate_multi_index_heatmap(args.csv_path, x_param="cbe", output_file=str(args.csv_path)+"_cbe.png")
+    #generate_multi_index_heatmap(args.csv_path, x_param="cbe", output_file=str(args.csv_path)+"_cbe.png")
     generate_multi_index_heatmap(args.csv_path, x_param="tbe", output_file=str(args.csv_path)+"_tbe.png")
 
 

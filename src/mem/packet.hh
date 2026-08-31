@@ -109,6 +109,7 @@ class MemCmd
         ReadExResp,
         ReadCleanReq,
         ReadSharedReq,
+        SFLoadLockedReq,
         LoadLockedReq,
         StoreCondReq,
         StoreCondFailReq,       // Failed StoreCondReq in MSHR (never sent)
@@ -945,6 +946,15 @@ class Packet : public Printable, public Extensible<Packet>
         cmd = MemCmd::ReadReq;
     }
 
+#if defined (STARVATION_FREEDOM)
+    void
+    convertLLToSFLL()
+    {
+        assert(isLLSC());
+        cmd = MemCmd::SFLoadLockedReq;
+    }
+#endif
+
     /**
      * Constructor. Note that a Request object must be constructed
      * first, but the Requests's physical address and size fields need
@@ -1510,7 +1520,8 @@ class Packet : public Printable, public Extensible<Packet>
 
     bool
     isLL() const {
-      return cmd == MemCmd::LoadLockedReq;
+      return (cmd == MemCmd::LoadLockedReq ||
+              cmd == MemCmd::SFLoadLockedReq);
     }
 #if defined (STARVATION_FREEDOM)
     bool

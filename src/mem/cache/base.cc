@@ -235,13 +235,13 @@ BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
       llscTrack.setLLCycle(curCycle());
       DPRINTF(Cache, "%s: Set state to LL response received\n", __func__);
       llscTrack.setStateToLLRespRecvd();
+      llscTrack.createPktCopy(pkt);
     }
 #endif
 
     // handle special cases for LockedRMW transactions
     if (pkt->isLockedRMW()) {
         Addr blk_addr = pkt->getBlockAddr(blkSize);
-
         if (pkt->isRead()) {
             // Read hit for LockedRMW.  Since it requires exclusive
             // permissions, there should be no outstanding access.
@@ -531,6 +531,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
       llscTrack.setLLCycle(curCycle());
       DPRINTF(Cache, "%s: Set state to LL response received\n", __func__);
       llscTrack.setStateToLLRespRecvd();
+      llscTrack.createPktCopy(pkt);
       if (llscTrack.isSquashed()) {
         DPRINTF(Cache, "%s: This LL is squashed, servicing pending responses\n", __func__);
         servicePendingRequestsOnLLSCAddr();
@@ -620,6 +621,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
             // and we have a copy of the block already. Since there
             // is no invalidation, we can promote targets that don't
             // require a writable copy
+            DPRINTF(Cache, "%s: PROMOTING READS\n", __func__);
             mshr->promoteReadable();
         }
 
@@ -628,6 +630,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
             // If at this point the referenced block is writable and the
             // response is not a cache invalidate, we promote targets that
             // were deferred as we couldn't guarrantee a writable copy
+            DPRINTF(Cache, "%s: PROMOTING WRITES\n", __func__);
             mshr->promoteWritable();
         }
     }
@@ -1306,11 +1309,11 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
             blk ? "hit " + blk->print() : "miss");
 
 #if defined (STARVATION_FREEDOM)
-    if (pkt->isSC() && !blk) {
-      panic("SC failure -- violating starvation freedom guarantee...");
+    if (pkt->isSC() && !blk &&
+        system->isAddrRegistered(pkt->req->getVaddr() & ~0x3F)) {
+        panic("SC failure -- violating starvation freedom guarantee...");
     }
 #endif
-
     if (pkt->req->isCacheMaintenance()) {
         // A cache maintenance operation is always forwarded to the
         // memory below even if the block is found in dirty state.
@@ -1544,18 +1547,18 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         maintainClusivity(pkt->fromCache(), blk);
 #if defined (STARVATION_FREEDOM)
         if (pkt->isLL()) {
+          DPRINTF(Cache, "%s: CHECKING LL ADDRESS %x %x %x\n", __func__,
+              pkt->req->getVaddr(), pkt->req->getPaddr(), pkt->getBlockAddr(blkSize));
+          if (system->isAddrRegistered(pkt->req->getVaddr() & ~0x3F)) {
+            DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
+                    __func__, pkt->getBlockAddr(blkSize));
+          }
           DPRINTF(Cache, "%s: Tracking LL the address: %x %x\n", \
             __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
           llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
           DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
           llscTrack.setStateToLLDispatch();
         }
-        /*
-        else if (pkt->isSC()) {
-          DPRINTF(Cache, "%s: Setting llsctrack to sc dispatch state %x\n", __func__, pkt->getAddr());
-          llscTrack.setStateToSCDispatch();
-        }
-        */
 #endif
         return true;
     }
@@ -1985,11 +1988,22 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
 
     // either a prefetch that is not present upstream, or a normal
     // MSHR request, proceed to get the packet to send downstream
+    if (tgt_pkt->isLL()) {
+      DPRINTF(Cache, "%s: CHECKING PROPERTIES: %s %s \n", __func__,
+                      tgt_pkt->isInvalidate(), tgt_pkt->needsWritable());
+    }
     PacketPtr pkt = createMissPacket(tgt_pkt, blk, mshr->needsWritable(),
                                      mshr->isWholeLineWrite());
 #if defined (STARVATION_FREEDOM)
     // This is a cache miss and the MSHR is created
     if (tgt_pkt->isLL()) {
+      DPRINTF(Cache, "%s: CHECKING LL ADDRESS %x %x %x\n", __func__,
+              tgt_pkt->req->getVaddr(), tgt_pkt->req->getPaddr(), tgt_pkt->getBlockAddr(blkSize));
+      if (system->isAddrRegistered(tgt_pkt->req->getVaddr() & ~0x3F)) {
+        DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
+                __func__, tgt_pkt->getBlockAddr(blkSize));
+      }
+
       DPRINTF(Cache, "%s: Tracking the address: %x %x\n", \
           __func__, tgt_pkt->getAddr(), tgt_pkt->getBlockAddr(blkSize));
       llscTrack.recordLLAddr(tgt_pkt->getBlockAddr(blkSize));
@@ -2752,7 +2766,6 @@ BaseCache::MemSidePort::recvFunctionalSnoop(PacketPtr pkt)
     } else {
       DPRINTF(Cache, "LLSCTrack is not active\n");
     }
-
     if (pkt->isDummySnoopCheck) {
       // Do not do the functional access if this is a dummy snoop check
       // This field in the packet is marked when we just want to do a dummy snoop

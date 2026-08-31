@@ -44,14 +44,14 @@ from tqdm import tqdm
 # ----------------------------------------------------------------------
 # Paths / binaries (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc_fw.py"
+GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc_with_stores.py"
 COMPILE_SCRIPT = "./scripts/rv-sf-scripts/compile.sh"
 GEM5_SF = "./build/RISCV_NoRuby_SF/gem5.fast"
 GEM5_NOSF = "./build/RISCV_NoRuby_NoSF/gem5.fast"
 
 now = datetime.now()
-WORKLOAD_DIR = "rv-sf-workloads"# + now.strftime("%Y%m%d")
-OUTPUT_DIR = "riscv-lrsc-exp"# + now.strftime("%Y%m%d")
+WORKLOAD_DIR = "rv-sf-workloads-with-stores"# + now.strftime("%Y%m%d")
+OUTPUT_DIR = "riscv-lrsc-exp-with-stores"# + now.strftime("%Y%m%d")
 
 CACHE_CONFIGS = [
     #("minor-one-level", "configs/riscv-sf-experiments/riscv_minor_one_level_cache.py"),

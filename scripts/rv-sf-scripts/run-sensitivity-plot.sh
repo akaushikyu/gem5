@@ -2,7 +2,7 @@
 for code_type in cr uc; do
   for core_type in minor o3; do
     for param in rob l1mshr sq; do
-      for axis in cbe tbe; do
+      for axis in tbe; do #cbe tbe; do
 
         echo python scripts/rv-sf-scripts/sensitivity-plot-simticks.py \
           --num-cpus 4 \

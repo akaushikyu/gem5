@@ -59,6 +59,12 @@ parser.add_argument("--l2-size", type=str, default=None,
                      help="Shared L2 size, e.g. '2MB'. Defaults to "
                           "256kB * num-cpus if unset")
 
+parser.add_argument("--l1i-size", type=str, default="32kB",
+                     help="L1i size, e.g. '2MB'. Defaults to 32kB")
+
+parser.add_argument("--l1d-size", type=str, default="32kB",
+                     help="L1D size, e.g. '2MB'. Defaults to 32kB")
+
 # Starvation freedom options
 parser.add_argument("--tbe-cycle-limit", type=int, default=1000)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
@@ -168,8 +174,8 @@ for cpu in system.cpu:
     cpu.createInterruptController()
 
 # ---- Private L1 caches (one pair per core) -------------------------------
-system.cpu_icache = [L1ICache() for _ in range(num_cpus)]
-system.cpu_dcache = [L1DCache(mshrs=args.dcache_mshrs) for _ in range(num_cpus)]
+system.cpu_icache = [L1ICache(size=args.l1i_size) for _ in range(num_cpus)]
+system.cpu_dcache = [L1DCache(mshrs=args.dcache_mshrs,size=args.l1d_size) for _ in range(num_cpus)]
 
 for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache):
     icache.connectCPU(cpu)
@@ -201,7 +207,7 @@ else:
     # 3, 5, 6...).
     l2_size = f"{256 * _next_pow2(num_cpus)}kB"
 
-system.l2cache = L2Cache(size=l2_size,mshrs=40)
+system.l2cache = L2Cache(size=l2_size)
 system.l2cache.connectCPUSideBus(system.l2bus)
 
 # ---- Main (system) memory bus ---------------------------------------------
