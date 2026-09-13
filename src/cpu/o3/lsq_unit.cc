@@ -880,8 +880,11 @@ LSQUnit::writebackStores()
             inst->recordResult(false);
             bool success = inst->tcBase()->getIsaPtr()->handleLockedWrite(
                     inst.get(), request->mainReq(), cacheBlockMask);
-            stats.SCIssued++;
-            if (!success) stats.SCFailed++;
+
+            if ((request->mainReq()->getVaddr() & ~0x3F) == 0xa98c0) {
+              stats.SCIssued++;
+              if (!success) stats.SCFailed++;
+            }
             inst->recordResult(true);
             request->packetSent();
 
@@ -1411,7 +1414,10 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
         load_inst->recordResult(false);
         load_inst->tcBase()->getIsaPtr()->handleLockedRead(load_inst.get(),
                 request->mainReq());
-        stats.LLIssued++;
+        DPRINTF(LSQUnit, "CHECKING VADDR %x %x\n",
+            request->mainReq()->getVaddr() , request->mainReq()->getVaddr() & ~0x3F);
+        if ((request->mainReq()->getVaddr() & ~0x3F) == 0xa98c0)
+          stats.LLIssued++;
         load_inst->recordResult(true);
     }
 

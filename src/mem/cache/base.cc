@@ -1547,11 +1547,13 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         maintainClusivity(pkt->fromCache(), blk);
 #if defined (STARVATION_FREEDOM)
         if (pkt->isLL()) {
-          DPRINTF(Cache, "%s: CHECKING LL ADDRESS %x %x %x\n", __func__,
+          if (pkt->req->hasVaddr()) {
+            DPRINTF(Cache, "%s: CHECKING LL ADDRESS %x %x %x\n", __func__,
               pkt->req->getVaddr(), pkt->req->getPaddr(), pkt->getBlockAddr(blkSize));
-          if (system->isAddrRegistered(pkt->req->getVaddr() & ~0x3F)) {
-            DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
+            if (system->isAddrRegistered(pkt->req->getVaddr() & ~0x3F)) {
+              DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
                     __func__, pkt->getBlockAddr(blkSize));
+            }
           }
           DPRINTF(Cache, "%s: Tracking LL the address: %x %x\n", \
             __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
@@ -1997,11 +1999,13 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
 #if defined (STARVATION_FREEDOM)
     // This is a cache miss and the MSHR is created
     if (tgt_pkt->isLL()) {
-      DPRINTF(Cache, "%s: CHECKING LL ADDRESS %x %x %x\n", __func__,
+      if (pkt->req->hasVaddr()) {
+        DPRINTF(Cache, "%s: CHECKING LL ADDRESS %x %x %x\n", __func__,
               tgt_pkt->req->getVaddr(), tgt_pkt->req->getPaddr(), tgt_pkt->getBlockAddr(blkSize));
-      if (system->isAddrRegistered(tgt_pkt->req->getVaddr() & ~0x3F)) {
-        DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
+        if (system->isAddrRegistered(tgt_pkt->req->getVaddr() & ~0x3F)) {
+          DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
                 __func__, tgt_pkt->getBlockAddr(blkSize));
+        }
       }
 
       DPRINTF(Cache, "%s: Tracking the address: %x %x\n", \
