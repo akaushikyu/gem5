@@ -47,7 +47,7 @@ from tqdm import tqdm
 # ----------------------------------------------------------------------
 # Paths / binaries (unchanged from sweep.sh)
 # ----------------------------------------------------------------------
-GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc.py"
+GEN_SCRIPT = "scripts/rv-sf-scripts/gen_riscv_lrsc_fw.py"
 COMPILE_SCRIPT = "./scripts/rv-sf-scripts/compile.sh"
 GEM5_SF = "./build/RISCV_NoRuby_SF/gem5.fast"
 GEM5_NOSF = "./build/RISCV_NoRuby_NoSF/gem5.fast"

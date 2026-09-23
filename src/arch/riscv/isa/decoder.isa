@@ -40,6 +40,8 @@
 // full MXLEN register, but that will cause memory address out of range as it is
 // always regarded as uint64. So we'll zero extend PC related registers and
 // memory address, and sign extend others.
+
+// [ANIRUDH] Make changes here...
 decode QUADRANT default Unknown::unknown() {
     0x0: decode COPCODE {
         0x0: CIAddi4spnOp::c_addi4spn({{
@@ -4883,6 +4885,15 @@ decode QUADRANT default Unknown::unknown() {
                         NPC = rvSext(NPC);
                     }
                 }}, IsDirectControl, IsCondControl);
+                0x3: bnerd({{
+                    if (rvSext(Rs1) != rvSext(Rs2)) {
+                        NPC = rvSext(PC + imm);
+                        SRd = 0;
+                    } else {
+                        NPC = rvSext(NPC);
+                        SRd = 0;
+                    }
+                }}, IsDirectControl, IsSpecialControl, IsInteger, IsCondControl);
                 0x4: blt({{
                     if (rvSext(Rs1_sd) < rvSext(Rs2_sd)) {
                         NPC = rvSext(PC + imm);

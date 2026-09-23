@@ -55,6 +55,9 @@ parser.add_argument("--num-cpus", type=int, default=1,
 parser.add_argument("--tbe-cycle-limit", type=int, default=500)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
 
+parser.add_argument("--l1i-size", type=str, default="32kB",
+                     help="L1i size, e.g. '2MB'. Defaults to 32kB")
+
 args = parser.parse_args()
 
 # ----------------------------------------------------------------------
@@ -127,7 +130,7 @@ for cpu in system.cpu:
     cpu.createInterruptController()
 
 # ---- Private L1 caches (one pair per core) -------------------------------
-system.cpu_icache = [L1ICache() for _ in range(num_cpus)]
+system.cpu_icache = [L1ICache(size=args.l1i_size) for _ in range(num_cpus)]
 system.cpu_dcache = [L1DCache() for _ in range(num_cpus)]
 
 for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache):

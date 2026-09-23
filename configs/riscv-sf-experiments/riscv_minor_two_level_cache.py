@@ -59,9 +59,21 @@ parser.add_argument("--l2-size", type=str, default=None,
                      help="Shared L2 size, e.g. '2MB'. Defaults to "
                           "256kB * num-cpus if unset")
 
+parser.add_argument("--l1i-size", type=str, default="32kB",
+                     help="L1i size, e.g. '2MB'. Defaults to 32kB")
+
+parser.add_argument("--l1d-size", type=str, default="32kB",
+                     help="L1D size, e.g. '2MB'. Defaults to 32kB")
+
 # Starvation freedom options
 parser.add_argument("--tbe-cycle-limit", type=int, default=1000)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
+
+parser.add_argument("--dcache-mshrs", type=int, default=4,
+                    help="L1 MSHRS")
+
+parser.add_argument("--sq-entries", type=int, default=1,
+                    help="SB size")
 
 args = parser.parse_args()
 
@@ -154,15 +166,16 @@ for cpu in system.cpu:
     cpu.executeCommitLimit = 1
     cpu.executeInputBufferSize = 1
     cpu.executeLSQMaxStoreBufferStoresPerCycle = 1
-    cpu.executeLSQStoreBufferSize = 1
+    cpu.executeLSQStoreBufferSize = args.sq_entries
+    cpu.executeAllowEarlyMemoryIssue = "false"
 
     # RISC-V needs no PIC wiring beyond this call, but each core needs
     # its own interrupt controller
     cpu.createInterruptController()
 
 # ---- Private L1 caches (one pair per core) -------------------------------
-system.cpu_icache = [L1ICache() for _ in range(num_cpus)]
-system.cpu_dcache = [L1DCache() for _ in range(num_cpus)]
+system.cpu_icache = [L1ICache(size=args.l1i_size) for _ in range(num_cpus)]
+system.cpu_dcache = [L1DCache(mshrs=args.dcache_mshrs,size=args.l1d_size) for _ in range(num_cpus)]
 
 for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache):
     icache.connectCPU(cpu)

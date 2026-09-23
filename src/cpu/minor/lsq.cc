@@ -1149,13 +1149,16 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         /* Handle LLSC requests and tests */
         if (is_load) {
             thread.getIsaPtr()->handleLockedRead(&context, request->request);
-            stats.LLIssued++;
+            if ((request->request->getVaddr() & ~0x3F)== 0xa98c0)
+              stats.LLIssued++;
         } else {
             do_access = thread.getIsaPtr()->handleLockedWrite(&context,
                     request->request, cacheBlockMask);
-            stats.SCIssued++;
-            if (!do_access) stats.SCFailed++;
 
+            if ((request->request->getVaddr() & ~0x3F) == 0xa98c0) {
+              stats.SCIssued++;
+              if (!do_access) stats.SCFailed++;
+            }
 
             if (!do_access) {
                 DPRINTF(MinorMem, "Not perfoming a memory "

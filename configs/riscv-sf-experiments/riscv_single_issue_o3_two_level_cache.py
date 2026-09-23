@@ -65,6 +65,12 @@ parser.add_argument("--l2-size", type=str, default=None,
                      help="Shared L2 size, e.g. '2MB'. Defaults to "
                           "256kB * num-cpus if unset")
 
+parser.add_argument("--l1i-size", type=str, default="32kB",
+                     help="L1I size, e.g. '2MB'. Defaults to 32kB")
+
+parser.add_argument("--l1d-size", type=str, default="32kB",
+                     help="L1D size, e.g. '2MB'. Defaults to 32kB")
+
 # ---- O3CPU microarchitectural parameters --------------------------------
 # Pipeline stage widths (instructions/cycle at each stage)
 parser.add_argument("--fetch-width", type=int, default=1)
@@ -104,6 +110,9 @@ parser.add_argument("--iew-to-commit-delay", type=int, default=1)
 # Starvation freedom options
 parser.add_argument("--tbe-cycle-limit", type=int, default=500)#(-1 & 0xFFFFFFFF))
 parser.add_argument("--cbe-insn-count-limit", type=int, default=(-1 & 0xFFFFFFFF))
+
+parser.add_argument("--dcache-mshrs", type=int, default=4,
+                    help="L1 MSHRS")
 
 args = parser.parse_args()
 
@@ -229,8 +238,8 @@ for cpu in system.cpu:
     cpu.createInterruptController()
 
 # ---- Private L1 caches (one pair per core) -------------------------------
-system.cpu_icache = [L1ICache() for _ in range(num_cpus)]
-system.cpu_dcache = [L1DCache() for _ in range(num_cpus)]
+system.cpu_icache = [L1ICache(size=args.l1i_size) for _ in range(num_cpus)]
+system.cpu_dcache = [L1DCache(mshrs=args.dcache_mshrs,size=args.l1d_size) for _ in range(num_cpus)]
 
 for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache):
     icache.connectCPU(cpu)

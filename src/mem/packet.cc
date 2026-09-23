@@ -151,15 +151,12 @@ MemCmd::commandInfo[] =
      * modified. */
     { {IsRead, IsRequest, NeedsResponse, FromCache},
             ReadResp, "ReadSharedReq" },
-    /* LoadLockedReq: note that we use plain ReadResp as response, so that
+    /* SFLoadLockedReq: note that we use plain ReadResp as response, so that
      *                we can also use ReadRespWithInvalidate when needed */
-#if defined (STARVATION_FREEDOM)
     { {IsRead, NeedsWritable, IsLlsc, IsRequest, IsInvalidate, NeedsResponse},
-            ReadExResp, "LoadLockedReq" },
-#else
+            ReadExResp, "SFLoadLockedReq" },
     { {IsRead, IsLlsc, IsRequest, NeedsResponse},
             ReadResp, "LoadLockedReq" },
-#endif
     /* StoreCondReq */
     { {IsWrite, NeedsWritable, IsLlsc,
            IsRequest, IsInvalidate, NeedsResponse, HasData, FromCache},

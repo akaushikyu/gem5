@@ -962,7 +962,6 @@ IEW::dispatchInsts(ThreadID tid)
             add_to_iq = false;
 
             ++iewStats.dispNonSpecInsts;
-
             toRename->iewInfo[tid].dispatchedToSQ++;
         } else if (inst->isLoad()) {
             DPRINTF(IEW, "[tid:%i] Issue: Memory instruction "
@@ -980,7 +979,14 @@ IEW::dispatchInsts(ThreadID tid)
         } else if (inst->isStore()) {
             DPRINTF(IEW, "[tid:%i] Issue: Memory instruction "
                     "encountered, adding to LSQ.\n", tid);
-
+#if defined (STARVATION_FREEDOM)
+            RegId r0 = RegId(inst->staticInst->destRegIdx(0).regClass(), static_cast<RegIndex>(0));
+            if (inst->staticInst->isStoreConditional() && inst->staticInst->destRegIdx(0) == r0) {
+              DPRINTF(IEW, "%s, FOUND SC WITH ZERO RD WHILE DISPATCHING\n", __func__);
+              DPRINTF(IEW, "%s, NOT INSERTING IN LDSTQUEUE\n", __func__);
+              // do not insert in ldst queue
+            } else
+#endif
             ldstQueue.insertStore(inst);
 
             ++iewStats.dispStoreInsts;
@@ -995,6 +1001,7 @@ IEW::dispatchInsts(ThreadID tid)
                 add_to_iq = false;
 
                 ++iewStats.dispNonSpecInsts;
+
             } else {
                 add_to_iq = true;
             }
@@ -1189,8 +1196,21 @@ IEW::executeInsts()
                     inst->fault = NoFault;
                 }
             } else if (inst->isStore()) {
-                fault = ldstQueue.executeStore(inst);
+#if defined (STARVATION_FREEDOM)
+                RegId r0 = RegId(inst->staticInst->destRegIdx(0).regClass(), static_cast<RegIndex>(0));
+                if (inst->staticInst->isStoreConditional() && inst->staticInst->destRegIdx(0) == r0) {
+                  DPRINTF(IEW, "%s: Found SC with 0 dst operand after \n", __func__);
+                  ldstQueue.informLLSCReservationInvalidate(inst->threadNumber);
+                  cpu->getContext(inst->threadNumber)->resetLLSCTracker();
+                  inst->setExecuted();
+                  instToCommit(inst);
+                  continue;
+                  // Maybe  commit the SC here...
+                  // instQueue.commit(inst->seqNum, inst->threadNumber);
+                }
+#endif
 
+                fault = ldstQueue.executeStore(inst);
                 if (inst->isTranslationDelayed() &&
                     fault == NoFault) {
                     // A hw page table walk is currently going on; the

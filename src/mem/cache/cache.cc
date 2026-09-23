@@ -162,6 +162,7 @@ Cache::satisfyRequest(PacketPtr pkt, CacheBlk *blk,
       llscTrack.setStateToSCComplete();
       DPRINTF(Cache, "%s: Reset LLSC tracker state\n", __func__);
       llscTrack.resetState();
+      llscTrack.markNoPendingReq();
     }
 #endif
 }
@@ -179,17 +180,18 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
 #if defined (STARVATION_FREEDOM)
     bool LLObserved = pkt->isLL();
     bool diffLLObserved = (LLObserved) ? llscTrack.isDifferentLL(pkt->getBlockAddr(blkSize)) : false;
+    bool reset = llscTrack.checkTBE(curCycle(), system->getTBECycleLimit());
     if (llscTrack.isActiveAndData()) {
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
-      bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
+
       if (diffLLObserved) {
         DPRINTF(Cache, "%s: NEW LL OBSERVED %x %x\n", __func__, pkt->getBlockAddr(blkSize), llscTrack.getLLSCAddr());
       }
       if (pkt->isInvalidateLLSC()) {
         DPRINTF(Cache, "%s: Observed invalidate llsc packet\n", __func__);
       }
-      if (reset || pkt->isInvalidateLLSC() || diffLLObserved || LLObserved) {
+      if (reset || pkt->isInvalidateLLSC() || diffLLObserved) {
         /* There are three conditions we need to service pending requests:
          * 1. We timed out under TBE execution environment
          * 2. We got a invalidateLLSC signal from the core under CBE execution environment
@@ -203,6 +205,15 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         if (llscTrack.isActivePending()) {
           DPRINTF(Cache, "%s servicing pending requests on %x\n", __func__, llscTrack.getLLSCAddr());
           servicePendingRequestsOnLLSCAddr();
+        } else if (pkt->isSC()) {
+          // invalidate if we have reset and this is an incoming SC
+          PacketPtr llpkt = llscTrack.getShadowPktCopy();
+          DPRINTF(Cache, "%s Getting shadow pkt copy %s\n", __func__, llpkt->print());
+          assert(llpkt != nullptr);
+          CacheBlk *old_blk(tags->findBlock({llpkt->getAddr(), llpkt->isSecure()}));
+          invalidateBlock(old_blk);
+          llscTrack.markNoPendingReq();
+          llscTrack.resetState();
         }
       }
     } else if (pkt->isInvalidateLLSC() && llscTrack.isActive()) {
@@ -213,18 +224,20 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
       llscTrack.setLLSquashed();
     }
 
-    /* [ANIRUDH] A few changes need to be done for conditional LR/SC
+    /* A few changes need to be done for conditional LR/SC
     * If the core sees another LR while a previous LR is pending, it should
     * service pending requests and reset the LLSC state. This logic needs
     * to be propagated to the pipeline changes as well....
     */
     if (pkt->isLL()) {
-      DPRINTF(Cache, "%s: Tracking LLSC in LL issued state addr: %x\n", \
-                     __func__, pkt->getBlockAddr(blkSize));
-      llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
-      DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
-      //llscTrack.setStateToLLIssued(diffLLObserved);
-      llscTrack.setStateToLLIssued();
+      if (system->isAddrRegistered(pkt->req->getVaddr() & ~0x3F)) {
+        DPRINTF(Cache, "%s: Marking SF enabled \n", __func__);
+        llscTrack.setSFEnabled();
+        pkt->convertLLToSFLL();
+        llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+        DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
+        llscTrack.setStateToLLIssued(diffLLObserved);
+      }
     } else if (pkt->isSC()) {
       DPRINTF(Cache, "%s: Doing SC %x\n", __func__, pkt->print());
     }
@@ -569,6 +582,9 @@ Cache::createMissPacket(PacketPtr cpu_pkt, CacheBlk *blk,
                         bool needsWritable,
                         bool is_whole_line_write) const
 {
+
+    DPRINTF(Cache, "%s: needs writable %s, is_whole_line_write: %s, pkt: %s\n",
+                    __func__, needsWritable, is_whole_line_write, cpu_pkt->print());
     // should never see evictions here
     assert(!cpu_pkt->isEviction());
 
@@ -601,6 +617,19 @@ Cache::createMissPacket(PacketPtr cpu_pkt, CacheBlk *blk,
         // only reason to be here is that blk is read only and we need
         // it to be writable
         assert(needsWritable);
+        /*
+#if defined (STARVATION_FREEDOM)
+        if (blk->isSet(CacheBlk::WritableBit)) {
+          // When we mark a SF request, we set the writable bit
+          // as well. Now, assume a scenario where a SF LL  followed
+          // an other load request and the same SF ll comes. The load
+          // will cause a downgrade and hence the SF ll will be an upgrade
+          // request. Since the writablebit is set, this causes an assert
+          // So a workaround is to clear it before proceeding
+          blk->clearCoherenceBits(CacheBlk::WritableBit);
+        }
+#endif
+        */
         assert(!blk->isSet(CacheBlk::WritableBit));
         cmd = cpu_pkt->isLLSC() ? MemCmd::SCUpgradeReq : MemCmd::UpgradeReq;
     } else if (cpu_pkt->cmd == MemCmd::SCUpgradeFailReq ||
@@ -621,9 +650,18 @@ Cache::createMissPacket(PacketPtr cpu_pkt, CacheBlk *blk,
         // * this cache is mostly exclusive and will not fill (since
         //   it does not fill it will have to writeback the dirty data
         //   immediately which generates uneccesary writebacks).
+        DPRINTF(Cache, "%s: HERE for cpu_pkt: %s\n", __func__, cpu_pkt->print());
         bool force_clean_rsp = isReadOnly || clusivity == enums::mostly_excl;
+        /*
+#if defined (STARVATION_FREEDOM)
+        if (cpu_pkt->isSFLL()) {
+          cmd = MemCmd::ReadExReq;
+        } else
+#else
+          */
         cmd = needsWritable ? MemCmd::ReadExReq :
             (force_clean_rsp ? MemCmd::ReadCleanReq : MemCmd::ReadSharedReq);
+//#endif
     }
     PacketPtr pkt = new Packet(cpu_pkt->req, cmd, blkSize);
 
@@ -776,6 +814,7 @@ Cache::recvAtomic(PacketPtr pkt)
 void
 Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
 {
+    DPRINTF(Cache, "%s: SERVICE MSHR TARGETS\n", __func__);
     QueueEntry::Target *initial_tgt = mshr->getTarget();
     // First offset for critical word first calculations
     const int initial_offset = initial_tgt->pkt->getOffset(blkSize);
@@ -807,6 +846,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
     MSHR::TargetList targets = mshr->extractServiceableTargets(pkt);
     for (auto &target: targets) {
         Packet *tgt_pkt = target.pkt;
+        DPRINTF(Cache, "%s LOOKING AT TGT PKT %s\n", __func__, tgt_pkt->print());
         switch (target.source) {
           case MSHR::Target::FromCPU:
             DPRINTF(Cache, "%s case mshr::target::fromCPU\n", __func__);
@@ -907,6 +947,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
                     // skip the rest of target processing after we
                     // send the response
                     // Mark block inaccessible until write arrives
+                    DPRINTF(Cache, "%s: Clearing writable %s\n", __func__, blk->print());
                     blk->clearCoherenceBits(CacheBlk::WritableBit);
                     blk->clearCoherenceBits(CacheBlk::ReadableBit);
                 }
@@ -1064,6 +1105,7 @@ Cache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt, CacheBlk *blk)
               } else
 #endif
               {
+                DPRINTF(Cache, "%s: Clearing writable %s\n", __func__, blk->print());
                 blk->clearCoherenceBits(CacheBlk::WritableBit);
               }
                 DPRINTF(Cache, "%s: Blk print after post downgrade: %s\n", __func__, blk->print());
@@ -1173,7 +1215,7 @@ Cache::servicePendingRequestsOnLLSCAddr() {
                   __func__, pendingPktList.size());
   assert(!pendingPktList.empty());
   CacheBlk* blk = tags->findBlock({pendingPktList[0]->getAddr(), false});
-  bool doInvalidate = true; // always invalidate regardless of pending requests or not//false;
+  bool doInvalidate = false;
   for (auto ppkt : pendingPktList) {
     DPRINTF(Cache, "SC done and there is an active pending request %x\n", ppkt->print());
     DPRINTF(Cache, "Servicing pending snoop request\n");
@@ -1185,6 +1227,7 @@ Cache::servicePendingRequestsOnLLSCAddr() {
   DPRINTF(Cache, "%s: Marking LLSC track no pending requests to service\n", __func__);
   llscTrack.markNoPendingReq();
   llscTrack.resetState();
+  DPRINTF(Cache, "%s: Clearing writable %s\n", __func__, blk->print());
   (doInvalidate) ? invalidateBlock(blk) : blk->clearCoherenceBits(CacheBlk::WritableBit);
 }
 
@@ -1398,6 +1441,7 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
         // below), remain in Owned (and will respond below), from
         // Exclusive to Shared, or remain in Shared
         if (!pkt->req->isUncacheable()) {
+            DPRINTF(Cache, "%s: Clearing writable %s\n", __func__, blk->print());
             blk->clearCoherenceBits(CacheBlk::WritableBit);
         }
         DPRINTF(Cache, "new state is %s\n", blk->print());
@@ -1612,15 +1656,23 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
       DPRINTF(Cache, "TBE CYCLE LIMIT SET AT %d\n", system->getTBECycleLimit());
       DPRINTF(Cache, "Current cycle: %d, LL active cycle %d\n", curCycle(), llscTrack.getLLCycle());
       bool reset = llscTrack.checkAndReset_TBE(curCycle(), system->getTBECycleLimit());
-      if (pkt->isInvalidateLLSC()) {
-        DPRINTF(Cache, "%s: Observed invalidate llsc packet\n", __func__);
-      }
       if (reset || pkt->isInvalidateLLSC()) {
         DPRINTF(Cache, "TBE reset for active LLSC %x\n", llscTrack.getLLSCAddr());
         if (llscTrack.isActivePending()) {
           DPRINTF(Cache, "%s servicing pending requests on %x\n", __func__, llscTrack.getLLSCAddr());
           servicePendingRequestsOnLLSCAddr();
         }
+        /*
+        else {
+          PacketPtr llpkt = llscTrack.getShadowPktCopy();
+          DPRINTF(Cache, "%s Getting shadow pkt copy %s\n", __func__, llpkt->print());
+          assert(llpkt != nullptr);
+          CacheBlk *old_blk(tags->findBlock({llpkt->getAddr(), llpkt->isSecure()}));
+          invalidateBlock(old_blk);
+          llscTrack.markNoPendingReq();
+          llscTrack.resetState();
+        }
+        */
       }
     }
 #endif
@@ -1675,6 +1727,20 @@ Cache::sendMSHRQueuePacket(MSHR* mshr)
 
     // use request from 1st target
     PacketPtr tgt_pkt = mshr->getTarget()->pkt;
+#if defined (STARVATION_FREEDOM)
+    if (tgt_pkt->isLL() &&
+        system->isAddrRegistered(tgt_pkt->req->getVaddr() & ~0x3F)) {
+        CacheBlk *blk = tags->findBlock({mshr->blkAddr, mshr->isSecure});
+        if (blk) {
+          DPRINTF(Cache, "%s: BLK DETAILS %s\n", __func__, blk->print());
+        }
+        DPRINTF(Cache, "%s: Marking SF enabled \n", __func__);
+        llscTrack.setSFEnabled();
+        DPRINTF(Cache, "%s: setting SF attrib \n", __func__);
+        tgt_pkt->convertLLToSFLL();
+        mshr->updateWritable();
+      }
+#endif
 
     if (tgt_pkt->cmd == MemCmd::HardPFReq && forwardSnoops) {
         DPRINTF(Cache, "%s: MSHR %s\n", __func__, tgt_pkt->print());

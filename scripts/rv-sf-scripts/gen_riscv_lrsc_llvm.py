@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 gen_riscv_lrsc.py
 
@@ -39,14 +39,6 @@ Options
                   blobs and then repeats the LR.  The loop only exits after a
                   successful SC.
 
-    --reg REG
-        RISC-V register used as the LR destination / SC status register
-        (e.g. t0, a0, s1).  Default: t0.
-
-    --sc-reg REG
-        Separate RISC-V register used to capture the SC result so that the
-        LR-loaded value is preserved for inspection.  Default: t1.
-
     --memorder MO
         Memory ordering suffix appended to LR/SC mnemonics.
         Choices: (none), .aq, .rl, .aqrl.  Default: .aqrl.
@@ -65,10 +57,10 @@ Examples
     # Unconditional, 3 blobs (12 arithmetic instrs) between LR and SC
     python gen_riscv_lrsc.py --unconditional --between 3
 
-    # Conditional: bne exits; 2 between blobs; 3 retry-fail blobs (24 instrs) on exit path
+    # Conditional: beq exits; 2 between blobs; 3 retry-fail blobs (24 instrs) on exit path
     python gen_riscv_lrsc.py --conditional --between 2 --retry-fail 3 --lr-fail-action exit
 
-    # Conditional: bne retries LR; 2 between blobs; 4 retry-fail blobs before retry
+    # Conditional: beq retries LR; 2 between blobs; 4 retry-fail blobs before retry
     python gen_riscv_lrsc.py --conditional --between 2 --retry-fail 4 --lr-fail-action retry
 
     # Write to file
@@ -77,10 +69,7 @@ Examples
 
 import argparse
 import sys
-from textwrap import (
-    dedent,
-    indent,
-)
+from textwrap import indent, dedent
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,21 +88,25 @@ BETWEEN_BLOB_SIZE = 4
 # %[arith0] and %[arith1] and form a true dependency chain so the hardware
 # cannot collapse them.
 #
-#   add  arith1, arith1, arith0   # arith1 += arith0
-#   sub  arith0, arith0, arith1   # arith0 -= arith1
-#   xor  arith1, arith1, arith0   # arith1 ^= arith0
-#   or   arith0, arith0, arith1   # arith0 |= arith1
+#   add  %[arith1], %[arith1], %[arith0]
+#   sub  %[arith0], %[arith0], %[arith1]
+#   xor  %[arith1], %[arith1], %[arith0]
+#   or   %[arith0], %[arith0], %[arith1]
 _BETWEEN_BLOB_INSTRS = [
-    ("add", "{a1}, {a1}, {a0}"),
-    ("sub", "{a0}, {a0}, {a1}"),
-    ("xor", "{a1}, {a1}, {a0}"),
-    ("or", "{a0}, {a0}, {a1}"),
+    ("add", "%[{a1}], %[{a1}], %[{a0}]"),
+    ("sub", "%[{a0}], %[{a0}], %[{a1}]"),
+    ("xor", "%[{a1}], %[{a1}], %[{a0}]"),
+    ("or",  "%[{a0}], %[{a0}], %[{a1}]"),
 ]
 assert len(_BETWEEN_BLOB_INSTRS) == BETWEEN_BLOB_SIZE
 
 
 def arith_blob(blob_index: int, arith0: str, arith1: str) -> list[str]:
-    """Return the BETWEEN_BLOB_SIZE asm lines for one between-blob (zero-indexed)."""
+    """Return the BETWEEN_BLOB_SIZE asm lines for one between-blob (zero-indexed).
+
+    arith0, arith1 are the asm operand names (e.g. 'arith0', 'arith1'),
+    not register names — the compiler allocates the actual registers.
+    """
     lines = []
     for instr_idx, (mnemonic, operands) in enumerate(_BETWEEN_BLOB_INSTRS):
         op = operands.format(a0=arith0, a1=arith1)
@@ -143,65 +136,52 @@ RETRY_BLOB_SIZE = 8
 #   - mem1 holds the loaded/stored value and is folded back into the
 #     arithmetic chain to maintain data dependencies.
 #
-#   add  arith1, arith1, arith0     # arith1 += arith0
-#   sub  arith0, arith0, arith1     # arith0 -= arith1
-#   xor  arith1, arith1, arith0     # arith1 ^= arith0
-#   or   arith0, arith0, arith1     # arith0 |= arith1
-#   lw   mem1,  64(addr)            # load word 64 bytes past LR/SC address
-#   sw   mem1,  64(addr)            # store it back to the same offset
-#   add  arith0, arith0, mem1       # fold loaded value into arith chain
-#   xor  arith1, arith1, mem1       # fold loaded value into arith chain
+#   add  %[arith1], %[arith1], %[arith0]
+#   sub  %[arith0], %[arith0], %[arith1]
+#   xor  %[arith1], %[arith1], %[arith0]
+#   or   %[arith0], %[arith0], %[arith1]
+#   lw   %[mem1],  64(%[addr])
+#   sw   %[mem1],  64(%[addr])
+#   add  %[arith0], %[arith0], %[mem1]
+#   xor  %[arith1], %[arith1], %[mem1]
 #
 # mem1 is an early-clobber output register for the loaded value.
 # The address register (addr) is already an input to the enclosing asm block.
 _RETRY_BLOB_INSTRS = [
-    ("add", "{a1}, {a1}, {a0}", "arith"),
-    ("sub", "{a0}, {a0}, {a1}", "arith"),
-    ("xor", "{a1}, {a1}, {a0}", "arith"),
-    ("or", "{a0}, {a0}, {a1}", "arith"),
-    ("lw", "{m1}, 64({addr})", "mem"),
-    ("lw", "{m1}, 64({addr})", "mem"),
-    ("add", "{a1}, {a0}, {m1}", "chain"),
-    ("xor", "{a0}, {a1}, {m1}", "chain"),
+    ("add", "%[{a1}], %[{a1}], %[{a0}]",    "arith"),
+    ("sub", "%[{a0}], %[{a0}], %[{a1}]",    "arith"),
+    ("xor", "%[{a1}], %[{a1}], %[{a0}]",    "arith"),
+    ("or",  "%[{a0}], %[{a0}], %[{a1}]",    "arith"),
+    ("lw",  "%[{m1}], 64(%[{addr}])",       "mem"),
+    ("sw",  "%[{m1}], 64(%[{addr}])",       "mem"),
+    ("add", "%[{a0}], %[{a0}], %[{m1}]",    "chain"),
+    ("xor", "%[{a1}], %[{a1}], %[{m1}]",    "chain"),
 ]
 assert len(_RETRY_BLOB_INSTRS) == RETRY_BLOB_SIZE
 
 
-def retry_fail_blob(
-    blob_index: int,
-    arith0: str,
-    arith1: str,
-    arith2: str,
-    addr: str,
-    mem1: str,
-) -> list[str]:
+def retry_fail_blob(blob_index: int, arith0: str, arith1: str,
+                    addr: str, mem1: str) -> list[str]:
     """Return the RETRY_BLOB_SIZE asm lines for one retry-fail blob (zero-indexed).
 
-    addr  : the asm operand name for the LR/SC address (e.g. '%[addr]').
-            lw/sw use addr+64 to access a 64-byte offset from the lock word.
-    mem1  : register that receives the loaded value.
+    arith0, arith1, addr, mem1 are asm operand names (not register names);
+    the compiler allocates the actual registers via the constraint block.
+    lw/sw access addr+64 — 64 bytes past the lock word.
     """
     lines = []
-    for instr_idx, (mnemonic, operands, _kind) in enumerate(
-        _RETRY_BLOB_INSTRS
-    ):
-        op = operands.format(
-            a0=arith0, a1=arith1, a2=arith2, addr=addr, m1=mem1
-        )
-        comment = (
-            f"  //# retry-fail blob {blob_index + 1} instr {instr_idx + 1}"
-        )
+    for instr_idx, (mnemonic, operands, _kind) in enumerate(_RETRY_BLOB_INSTRS):
+        op = operands.format(a0=arith0, a1=arith1, addr=addr, m1=mem1)
+        comment = f"  //# retry-fail blob {blob_index + 1} instr {instr_idx + 1}"
         lines.append(f'        "{mnemonic}  {op}\\n\\t"{comment}')
     return lines
 
 
-def retry_fail_blobs(
-    count: int, arith0: str, arith1: str, arith2: str, addr: str, mem1: str
-) -> list[str]:
+def retry_fail_blobs(count: int, arith0: str, arith1: str,
+                     addr: str, mem1: str) -> list[str]:
     """Return asm lines for *count* consecutive retry-fail blobs."""
     lines = []
     for b in range(count):
-        lines += retry_fail_blob(b, arith0, arith1, arith2, addr, mem1)
+        lines += retry_fail_blob(b, arith0, arith1, addr, mem1)
     return lines
 
 
@@ -211,19 +191,14 @@ def build_asm_lines(
     between: int,
     retry_fail: int,
     lr_fail_action: str,
-    reg: str,
-    sc_reg: str,
-    arith0: str,
-    arith1: str,
-    arith2: str,
-    mem1: str,
     memorder: str,
 ) -> list[str]:
     """
     Build the raw asm string lines (no surrounding C boilerplate).
 
-    The post-LR conditional branch is always bne: it fires when the loaded
-    value equals the expected value.
+    All registers are referenced via named constraint placeholders (%[name])
+    so the compiler allocates them — no hard-coded register names appear in
+    the asm string.
 
     Between the post-LR branch and SC: *between* arithmetic blobs
     (each = BETWEEN_BLOB_SIZE=4 instrs: add, sub, xor, or).
@@ -234,11 +209,12 @@ def build_asm_lines(
     Conditional flow — lr_fail_action="exit"
     -----------------------------------------
       retry:
-        lr.w<mo>  <reg>, (addr)
-        bne <reg>, <expected>, lr_cond_fail
+        lr.w<mo>  %[lr_val], (%[addr])
+        bne %[lr_val], %[expected], lr_cond_fail
         <between * BETWEEN_BLOB_SIZE arithmetic instrs>
-        sc.w<mo>  <sc_reg>, <newval>, (addr)
-        bnez <sc_reg>, sc_fail
+        sc.w<mo>  %[sc_result], %[newval], (%[addr])
+        bnez %[sc_result], sc_fail
+        sw zero, 0(%[addr])
         j done
       sc_fail:
         j retry
@@ -251,11 +227,12 @@ def build_asm_lines(
       lr_retry:
         <retry_fail * RETRY_BLOB_SIZE mixed instrs>
       retry:
-        lr.w<mo>  <reg>, (addr)
-        bne <reg>, <expected>, lr_retry
+        lr.w<mo>  %[lr_val], (%[addr])
+        bne %[lr_val], %[expected], lr_retry
         <between * BETWEEN_BLOB_SIZE arithmetic instrs>
-        sc.w<mo>  <sc_reg>, <newval>, (addr)
-        bnez <sc_reg>, sc_fail
+        sc.w<mo>  %[sc_result], %[newval], (%[addr])
+        bnez %[sc_result], sc_fail
+        sw zero, 0(%[addr])
         j done
       sc_fail:
         j retry
@@ -263,9 +240,9 @@ def build_asm_lines(
 
     Unconditional flow
     ------------------
-        lr.w<mo>  <reg>, (addr)
+        lr.w<mo>  %[lr_val], (%[addr])
         <between * BETWEEN_BLOB_SIZE arithmetic instrs>
-        sc.w<mo>  <sc_reg>, <newval>, (addr)
+        sc.w<mo>  %[sc_result], %[newval], (%[addr])
     """
 
     mo = memorder
@@ -273,69 +250,45 @@ def build_asm_lines(
 
     if conditional:
         if lr_fail_action == "retry":
-            # Conditional LR/SC with retry:
-            #   - LR checks that the loaded value == 0 (expected)
-            #   - SC writes 1 (newval) if the reservation holds
-            #   - On SC success, a plain store resets the address back to 0
-            #   - If the loaded value != 0, the retry-fail blobs execute and
-            #     the LR is attempted again
             lines.append('        "lr_retry_%=:\\n\\t"')
-            lines += retry_fail_blobs(
-                retry_fail, arith0, arith1, arith2, "%[addr]", mem1
-            )
+            lines += retry_fail_blobs(retry_fail, "arith0", "arith1", "addr", "mem1")
             lines.append('        "retry_%=:\\n\\t"')
-            lines.append(f'        "lr.w{mo}  {reg}, (%[addr])\\n\\t"')
+            lines.append(f'        "lr.w{mo}  %[lr_val], (%[addr])\\n\\t"')
             lines.append(
-                f'        "bne {reg}, %[expected], lr_retry_%=\\n\\t"'
-                f"  //# retry LR if loaded != 0 (expected == 0)"
+                f'        "bne %[lr_val], %[expected], lr_retry_%=\\n\\t"'
+                f'  //# retry LR if loaded != expected (expected == 0)'
             )
-            lines += between_blobs(between, arith0, arith1)
-            lines.append(
-                f'        "sc.w{mo}  {sc_reg}, %[newval], (%[addr])\\n\\t"'
-            )
-            lines.append(f'        "bnez {sc_reg}, sc_fail_%=\\n\\t"')
-            lines.append(
-                f'        "sw zero, 0(%[addr])\\n\\t"'
-                f"  //# SC succeeded: reset address to 0"
-            )
+            lines += between_blobs(between, "arith0", "arith1")
+            lines.append(f'        "sc.w{mo}  %[sc_result], %[newval], (%[addr])\\n\\t"')
+            lines.append(f'        "bnez %[sc_result], sc_fail_%=\\n\\t"')
+            lines.append(f'        "sw zero, 0(%[addr])\\n\\t"'
+                         f'  //# SC succeeded: reset address to 0')
             lines.append('        "j done_%=\\n\\t"')
             lines.append('        "sc_fail_%=:\\n\\t"')
             lines.append('        "j retry_%=\\n\\t"')
             lines.append('        "done_%=:\\n\\t"')
         else:  # lr_fail_action == "exit"
-            # Conditional LR/SC with no retry:
-            #   - LR checks that the loaded value == 0 (expected)
-            #   - SC writes 1 (newval) if the reservation holds
-            #   - On SC success, a plain store resets the address back to 0
             lines.append('        "retry_%=:\\n\\t"')
-            lines.append(f'        "lr.w{mo}  {reg}, (%[addr])\\n\\t"')
+            lines.append(f'        "lr.w{mo}  %[lr_val], (%[addr])\\n\\t"')
             lines.append(
-                f'        "bne {reg}, %[expected], lr_cond_fail_%=\\n\\t"'
-                f"  //# exit if loaded != 0 (expected == 0)"
+                f'        "bne %[lr_val], %[expected], lr_cond_fail_%=\\n\\t"'
+                f'  //# exit if loaded != expected (expected == 0)'
             )
-            lines += between_blobs(between, arith0, arith1)
-            lines.append(
-                f'        "sc.w{mo}  {sc_reg}, %[newval], (%[addr])\\n\\t"'
-            )
-            lines.append(f'        "bnez {sc_reg}, sc_fail_%=\\n\\t"')
-            lines.append(
-                f'        "sw zero, 0(%[addr])\\n\\t"'
-                f"  //# SC succeeded: reset address to 0"
-            )
+            lines += between_blobs(between, "arith0", "arith1")
+            lines.append(f'        "sc.w{mo}  %[sc_result], %[newval], (%[addr])\\n\\t"')
+            lines.append(f'        "bnez %[sc_result], sc_fail_%=\\n\\t"')
+            lines.append(f'        "sw zero, 0(%[addr])\\n\\t"'
+                         f'  //# SC succeeded: reset address to 0')
             lines.append('        "j done_%=\\n\\t"')
             lines.append('        "sc_fail_%=:\\n\\t"')
             lines.append('        "j retry_%=\\n\\t"')
             lines.append('        "lr_cond_fail_%=:\\n\\t"')
-            lines += retry_fail_blobs(
-                retry_fail, arith0, arith1, "%[addr]", mem1
-            )
+            lines += retry_fail_blobs(retry_fail, "arith0", "arith1", "addr", "mem1")
             lines.append('        "done_%=:\\n\\t"')
     else:
-        lines.append(f'        "lr.w{mo}  {reg}, (%[addr])\\n\\t"')
-        lines += between_blobs(between, arith0, arith1)
-        lines.append(
-            f'        "sc.w{mo}  {sc_reg}, %[newval], (%[addr])\\n\\t"'
-        )
+        lines.append(f'        "lr.w{mo}  %[lr_val], (%[addr])\\n\\t"')
+        lines += between_blobs(between, "arith0", "arith1")
+        lines.append(f'        "sc.w{mo}  %[sc_result], %[newval], (%[addr])\\n\\t"')
 
     return lines
 
@@ -358,7 +311,6 @@ HEADER = """\
 #include <cstdio>
 #include <thread>
 #include <vector>
-#include "gem5/m5ops.h"
 
 // Shared counter exercised by the LR/SC sequences.
 static volatile int32_t g_counter = 0;
@@ -372,12 +324,6 @@ def make_lrsc_function(
     between: int,
     retry_fail: int,
     lr_fail_action: str,
-    reg: str,
-    sc_reg: str,
-    arith0: str,
-    arith1: str,
-    arith2: str,
-    mem1: str,
     memorder: str,
     iterations: int,
 ) -> str:
@@ -388,12 +334,6 @@ def make_lrsc_function(
         between=between,
         retry_fail=retry_fail,
         lr_fail_action=lr_fail_action,
-        reg=reg,
-        sc_reg=sc_reg,
-        arith0=arith0,
-        arith1=arith1,
-        arith2=arith2,
-        mem1=mem1,
         memorder=memorder,
     )
 
@@ -404,33 +344,28 @@ def make_lrsc_function(
 
     asm_body = "\n".join(asm_lines)
 
-    # All output registers use early-clobber ("=&r") so GCC won't alias any
-    # of them with the input operands.
-    # arith_a / arith_b : scratch registers for both blob types; initialised
-    #                     to 1 and 2 so the dependency chain starts non-zero.
-    # mem_val           : receives the value loaded by lw in retry-fail blobs.
-    #                     lw/sw use 64(%[addr]) — 64 bytes past the lock word.
+    # All output registers use named early-clobber constraints ("=&r") so the
+    # compiler allocates non-overlapping registers for every operand.
+    # No register names appear in the asm string — %[name] placeholders are
+    # used throughout, letting both GCC and Clang assign registers freely.
     if conditional:
         if lr_fail_action == "exit":
-            # expected_val = 0 : LR succeeds only when address holds 0.
-            # new_val      = 1 : SC atomically writes 1 on success.
-            # After a successful SC the asm resets the address to 0 via
-            # "sw zero, 0(%[addr])" so the invariant is restored for the
-            # next iteration / next thread.
-            asm_block = dedent(
-                f"""\
+            asm_block = dedent(f"""\
                 int32_t lr_val, sc_result, arith_a = 1, arith_b = 2;
                 int32_t mem_val = 0;
                 const int32_t expected_val = 0;  // LR checks for 0
                 const int32_t new_val      = 1;  // SC writes 1
                 __asm__ volatile (
 {asm_body}
-                    : "=&r"(lr_val), "=&r"(sc_result),
-                      [arith0] "=&r"(arith_a), [arith1] "=&r"(arith_b),
-                      [mem1] "=&r"(mem_val)
-                    : [addr] "r"(&g_counter), [newval] "r"(new_val),
-                      [expected] "r"(expected_val),
-                      "0"(arith_a), "1"(arith_b)
+                    : [lr_val]    "=&r"(lr_val),
+                      [sc_result] "=&r"(sc_result),
+                      [arith0]    "=&r"(arith_a),
+                      [arith1]    "=&r"(arith_b),
+                      [mem1]      "=&r"(mem_val)
+                    : [addr]      "r"  (&g_counter),
+                      [newval]    "r"  (new_val),
+                      [expected]  "r"  (expected_val),
+                      "3"(arith_a), "4"(arith_b)
                     : "memory"
                 );
                 (void)lr_val;
@@ -438,28 +373,24 @@ def make_lrsc_function(
                 (void)arith_a;
                 (void)arith_b;
                 (void)mem_val;
-            """
-            )
+            """)
         else:  # retry
-            # expected_val = 0 : LR loops until address holds 0.
-            # new_val      = 1 : SC atomically writes 1 on success.
-            # After a successful SC the asm resets the address to 0 via
-            # "sw zero, 0(%[addr])" so the invariant is restored for the
-            # next iteration / next thread.
-            asm_block = dedent(
-                f"""\
+            asm_block = dedent(f"""\
                 int32_t lr_val, sc_result, arith_a = 1, arith_b = 2;
                 int32_t mem_val = 0;
                 const int32_t expected_val = 0;  // LR checks for 0
                 const int32_t new_val      = 1;  // SC writes 1
                 __asm__ volatile (
 {asm_body}
-                    : "=&r"(lr_val), "=&r"(sc_result),
-                      [arith0] "=&r"(arith_a), [arith1] "=&r"(arith_b),
-                      [mem1] "=&r"(mem_val)
-                    : [addr] "r"(&g_counter), [newval] "r"(new_val),
-                      [expected] "r"(expected_val),
-                      "0"(arith_a), "1"(arith_b)
+                    : [lr_val]    "=&r"(lr_val),
+                      [sc_result] "=&r"(sc_result),
+                      [arith0]    "=&r"(arith_a),
+                      [arith1]    "=&r"(arith_b),
+                      [mem1]      "=&r"(mem_val)
+                    : [addr]      "r"  (&g_counter),
+                      [newval]    "r"  (new_val),
+                      [expected]  "r"  (expected_val),
+                      "3"(arith_a), "4"(arith_b)
                     : "memory"
                 );
                 (void)lr_val;
@@ -467,75 +398,52 @@ def make_lrsc_function(
                 (void)arith_a;
                 (void)arith_b;
                 (void)mem_val;
-            """
-            )
+            """)
     else:
-        asm_block = dedent(
-            f"""\
+        asm_block = dedent(f"""\
             int32_t lr_val, sc_result, arith_a = 1, arith_b = 2;
             __asm__ volatile (
 {asm_body}
-                : "=&r"(lr_val), "=&r"(sc_result),
-                  [arith0] "=&r"(arith_a), [arith1] "=&r"(arith_b)
-                : [addr] "r"(&g_counter), [newval] "r"(new_val),
-                  "0"(arith_a), "1"(arith_b)
+                : [lr_val]    "=&r"(lr_val),
+                  [sc_result] "=&r"(sc_result),
+                  [arith0]    "=&r"(arith_a),
+                  [arith1]    "=&r"(arith_b)
+                : [addr]      "r"  (&g_counter),
+                  [newval]    "r"  (new_val),
+                  "2"(arith_a), "3"(arith_b)
                 : "memory"
             );
             (void)lr_val;
             (void)sc_result;
             (void)arith_a;
             (void)arith_b;
-        """
-        )
+        """)
 
     loop_body = indent(asm_block, " " * 8)
 
     lines = [
         f"// {'Conditional' if conditional else 'Unconditional'} LR/SC sequence",
-        f"// - Between-blobs (LR branch → SC)          : {between}"
+        f"// - Between-blobs (LR branch → SC)            : {between}"
         f" ({between * BETWEEN_BLOB_SIZE} instrs, blob size = {BETWEEN_BLOB_SIZE})",
     ]
     if conditional:
-        lines.append(
-            f"// - Post-LR conditional branch              : bne "
-            + (
-                "(LR checks loaded == 0; retries if loaded != 0)"
-                if lr_fail_action == "retry"
-                else "(LR checks loaded == 0; exits if loaded != 0)"
-            )
-        )
-        lines.append(
-            f"// - LR-fail action                          : {lr_fail_action} "
-            f"({'retry LR' if lr_fail_action == 'retry' else 'exit loop'})"
-        )
-        lines.append(
-            f"// - Retry-fail blobs (LR-condition-fail path): {retry_fail}"
-            f" ({retry_fail * RETRY_BLOB_SIZE} instrs, blob size = {RETRY_BLOB_SIZE},"
-            f" {'before LR retry' if lr_fail_action == 'retry' else 'before done'})"
-        )
-        lines.append(
-            f"// - SC writes                               : 1 (then resets addr to 0 on success)"
-        )
-    lines.append(
-        f"// - Memory ordering                          : lr.w{memorder} / sc.w{memorder}"
-    )
-    lines.append(f"// - LR destination register                 : {reg}")
-    lines.append(f"// - SC status register                      : {sc_reg}")
-    lines.append(
-        f"// - Arithmetic blob registers               : {arith0}, {arith1}"
-    )
-    if conditional:
-        lines.append(
-            f"// - Retry-fail memory register              : {mem1} (loaded value; lw/sw at addr+64)"
-        )
+        lines.append(f"// - Post-LR conditional branch                : bne "
+                     + ("(LR checks loaded == 0; retries if loaded != 0)"
+                        if lr_fail_action == "retry"
+                        else "(LR checks loaded == 0; exits if loaded != 0)"))
+        lines.append(f"// - LR-fail action                            : {lr_fail_action} "
+                     f"({'retry LR' if lr_fail_action == 'retry' else 'exit loop'})")
+        lines.append(f"// - Retry-fail blobs (LR-condition-fail path) : {retry_fail}"
+                     f" ({retry_fail * RETRY_BLOB_SIZE} instrs, blob size = {RETRY_BLOB_SIZE},"
+                     f" {'before LR retry' if lr_fail_action == 'retry' else 'before done'})")
+        lines.append(f"// - SC writes                                 : 1 (then resets addr to 0 on success)")
+    lines.append(f"// - Memory ordering                            : lr.w{memorder} / sc.w{memorder}")
+    lines.append(f"// - Registers                                  : compiler-allocated via named constraints")
     lines.append(f"//")
     lines.append(f"static void {func_name}(int iterations = {iterations}) {{")
-    lines.append(f'    m5_add_symbol((uint64_t)&g_counter, "global");')
     lines.append(f"    for (int i = 0; i < iterations; ++i) {{")
     if not conditional:
-        lines.append(
-            f"        const int32_t new_val = i & 0x7fffffff;  // arbitrary store value"
-        )
+        lines.append(f"        const int32_t new_val = i & 0x7fffffff;  // arbitrary store value")
     lines.append(loop_body.rstrip())
     lines.append(f"    }}")
     lines.append(f"}}")
@@ -560,8 +468,7 @@ def make_main(
     if conditional:
         func_name += f"_fail{retry_fail}_{lr_fail_action}"
 
-    return dedent(
-        f"""\
+    return dedent(f"""\
         int main() {{
             constexpr int kThreads    = {threads};
             constexpr int kIterations = {iterations};
@@ -581,14 +488,12 @@ def make_main(
             printf("Done. g_counter final value: %d\\n", g_counter);
             return 0;
         }}
-    """
-    )
+    """)
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -618,8 +523,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=0,
         metavar="N",
         help=f"Number of arithmetic blobs between the post-LR branch and SC "
-        f"(conditional), or between LR and SC (unconditional). "
-        f"Each blob = {BETWEEN_BLOB_SIZE} instructions (add, sub, xor, or). (default: 0)",
+             f"(conditional), or between LR and SC (unconditional). "
+             f"Each blob = {BETWEEN_BLOB_SIZE} instructions (add, sub, xor, or). (default: 0)",
     )
     p.add_argument(
         "--retry-fail",
@@ -627,9 +532,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=0,
         metavar="M",
         help=f"(Conditional only) Number of mixed blobs on the LR-condition-fail "
-        f"path: before the next LR attempt (retry action) or before done "
-        f"(exit action). Each blob = {RETRY_BLOB_SIZE} instructions "
-        f"(add, sub, xor, or, lw, sw, add, xor). (default: 0)",
+             f"path: before the next LR attempt (retry action) or before done "
+             f"(exit action). Each blob = {RETRY_BLOB_SIZE} instructions "
+             f"(add, sub, xor, or, lw, sw, add, xor). (default: 0)",
     )
     p.add_argument(
         "--lr-fail-action",
@@ -637,47 +542,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=["exit", "retry"],
         metavar="ACTION",
         help="(Conditional only) What to do when the post-LR branch fires: "
-        "'exit' jumps to lr_cond_fail then done (retry_fail blobs run before done); "
-        "'retry' jumps back to lr_retry and repeats the LR (retry_fail blobs run "
-        "before each LR attempt). (default: exit)",
-    )
-    p.add_argument(
-        "--reg",
-        default="t0",
-        metavar="REG",
-        help="RISC-V register that receives the LR-loaded value. (default: t0)",
-    )
-    p.add_argument(
-        "--sc-reg",
-        default="t1",
-        metavar="REG",
-        help="Separate RISC-V register that receives the SC result (0=ok, 1=fail). "
-        "(default: t1)",
-    )
-    p.add_argument(
-        "--arith0",
-        default="t2",
-        metavar="REG",
-        help="First scratch register used by the arithmetic blobs. (default: t2)",
-    )
-    p.add_argument(
-        "--arith1",
-        default="t3",
-        metavar="REG",
-        help="Second scratch register used by the arithmetic blobs. (default: t3)",
-    )
-    p.add_argument(
-        "--mem1",
-        default="t4",
-        metavar="REG",
-        help="(Conditional only) Register receiving the value loaded by the "
-        "lw instruction in retry-fail blobs (lw/sw use addr+64). (default: t4)",
-    )
-    p.add_argument(
-        "--arith2",
-        default="t5",
-        metavar="REG",
-        help="Third scratch register used by the arithmetic blobs. (default: t5)",
+             "'exit' jumps to lr_cond_fail then done (retry_fail blobs run before done); "
+             "'retry' jumps back to lr_retry and repeats the LR (retry_fail blobs run "
+             "before each LR attempt). (default: exit)",
     )
     p.add_argument(
         "--memorder",
@@ -685,7 +552,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=["", ".aq", ".rl", ".aqrl"],
         metavar="MO",
         help="Memory ordering suffix for LR/SC (none | .aq | .rl | .aqrl). "
-        "(default: .aqrl)",
+             "(default: .aqrl)",
     )
     p.add_argument(
         "--output",
@@ -723,34 +590,11 @@ def validate(args: argparse.Namespace) -> None:
         errors.append("--threads must be >= 1")
     if args.iterations < 1:
         errors.append("--iterations must be >= 1")
-    if args.reg == args.sc_reg:
-        errors.append("--reg and --sc-reg must be different registers")
-    all_regs = {
-        "--reg": args.reg,
-        "--sc-reg": args.sc_reg,
-        "--arith0": args.arith0,
-        "--arith1": args.arith1,
-        "--arith2": args.arith2,
-        "--mem1": args.mem1,
-    }
-    seen: dict[str, str] = {}
-    for flag, reg in all_regs.items():
-        if reg in seen:
-            errors.append(
-                f"{flag} and {seen[reg]} both use register '{reg}'; all registers must be distinct"
-            )
-        else:
-            seen[reg] = flag
-
     if not args.conditional:
         if args.retry_fail != 0:
-            warnings.append(
-                "--retry-fail is only meaningful with --conditional; it will be ignored."
-            )
+            warnings.append("--retry-fail is only meaningful with --conditional; it will be ignored.")
         if args.lr_fail_action != "exit":
-            warnings.append(
-                "--lr-fail-action is only meaningful with --conditional; it will be ignored."
-            )
+            warnings.append("--lr-fail-action is only meaningful with --conditional; it will be ignored.")
 
     for w in warnings:
         print(f"Warning: {w}", file=sys.stderr)
@@ -771,12 +615,6 @@ def generate(args: argparse.Namespace) -> str:
             between=args.between,
             retry_fail=args.retry_fail if args.conditional else 0,
             lr_fail_action=args.lr_fail_action,
-            reg=args.reg,
-            sc_reg=args.sc_reg,
-            arith0=args.arith0,
-            arith1=args.arith1,
-            arith2=args.arith2,
-            mem1=args.mem1,
             memorder=args.memorder,
             iterations=args.iterations,
         ),

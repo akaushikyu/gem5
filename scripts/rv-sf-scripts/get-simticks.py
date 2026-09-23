@@ -193,14 +193,14 @@ def collect_simticks(root_dir, code_type, core_type, cache_levels, num_cpus):
             rb = int(sf_match.group("rb")) if sf_match.group("rb") else np.nan
             axis = sf_match.group("axis")
             axis_value = int(sf_match.group("axis_value"))
-            cbe = axis_value if axis == "cbe" else np.nan
+            #cbe = axis_value if axis == "cbe" else np.nan
             tbe = axis_value if axis == "tbe" else np.nan
             is_baseline = False
         elif nosf_match:
             bb = int(nosf_match.group("bb"))
             eb = int(nosf_match.group("eb")) if nosf_match.group("eb") else np.nan
             rb = int(nosf_match.group("rb")) if nosf_match.group("rb") else np.nan
-            cbe = np.nan
+            #cbe = np.nan
             tbe = np.nan
             is_baseline = True
         else:
@@ -210,14 +210,16 @@ def collect_simticks(root_dir, code_type, core_type, cache_levels, num_cpus):
         records.append({
             "directory": dirname,
             "bb": bb, "rb": rb, "eb": eb,
-            "cbe": cbe, "tbe": tbe,
+            #"cbe": cbe,
+            "tbe": tbe,
             "is_baseline": is_baseline,
             "simTicks": simticks,
         })
 
     df = pd.DataFrame(
         records,
-        columns=["directory", "bb", "rb", "eb", "cbe", "tbe", "is_baseline", "simTicks"],
+        #columns=["directory", "bb", "rb", "eb", "cbe", "tbe", "is_baseline", "simTicks"],
+        columns=["directory", "bb", "rb", "eb", "tbe", "is_baseline", "simTicks"],
     )
     if df.empty:
         raise ValueError(
@@ -226,7 +228,8 @@ def collect_simticks(root_dir, code_type, core_type, cache_levels, num_cpus):
             "Check these values against your directory naming."
         )
     return df.sort_values(
-        ["is_baseline", "bb", "rb", "eb", "cbe", "tbe"], na_position="first"
+        #["is_baseline", "bb", "rb", "eb", "cbe", "tbe"], na_position="first"
+        ["is_baseline", "bb", "rb", "eb", "tbe"], na_position="first"
     ).reset_index(drop=True)
 
 
@@ -268,7 +271,8 @@ def normalize_simticks(df):
         )
 
     return merged.sort_values(
-        ["bb", "rb", "eb", "cbe", "tbe"], na_position="first"
+        #["bb", "rb", "eb", "cbe", "tbe"], na_position="first"
+        ["bb", "rb", "eb", "tbe"], na_position="first"
     ).reset_index(drop=True)
 
 
@@ -289,7 +293,8 @@ def compute_minmax_simticks(normalized_df):
     grouped = normalized_df.groupby(["bb", "rb", "eb"], dropna=False)
     for (bb, rb, eb), group in grouped:
         g = group.dropna(subset=["normalized_simTicks"])
-        for axis_name, col in (("CBE", "cbe"), ("TBE", "tbe")):
+        #for axis_name, col in (("CBE", "cbe"), ("TBE", "tbe")):
+        for axis_name, col in (("TBE", "tbe")):
             axis_group = g.dropna(subset=[col])
             if axis_group.empty:
                 continue
@@ -402,8 +407,8 @@ def plot_minmax_bar_chart(minmax_df, output_path=None, show=False,
     n_configs = len(configs)
 
     series = [
-        ("CBE", "max", "CBE Max", "#d9534f"),
-        ("CBE", "min", "CBE Min", "#5cb85c"),
+        #("CBE", "max", "CBE Max", "#d9534f"),
+        #("CBE", "min", "CBE Min", "#5cb85c"),
         ("TBE", "max", "TBE Max", "#f0ad4e"),
         ("TBE", "min", "TBE Min", "#5bc0de"),
     ]
@@ -502,28 +507,28 @@ def main():
         normalized_indexed.to_csv(args.output)
         print(f"\nSaved normalized results to {args.output}")
 
-    if args.plot:
-        plot_normalized_bar_chart(
-            normalized,
-            output_path=args.plot_output,
-            num_cpus=args.num_cpus,
-            code_type=args.code_type,
-            core_type=args.core_type,
-            cache_levels=args.cache_levels,
-        )
+    #if args.plot:
+    #    plot_normalized_bar_chart(
+    #        normalized,
+    #        output_path=args.plot_output,
+    #        num_cpus=args.num_cpus,
+    #        code_type=args.code_type,
+    #        core_type=args.core_type,
+    #        cache_levels=args.cache_levels,
+    #    )
 
-    if args.plot_minmax:
-        minmax = compute_minmax_simticks(normalized)
-        print("\nMax/min normalized simTicks per (bb, rb, eb):")
-        print(minmax.set_index(["bb", "rb", "eb"]))
-        plot_minmax_bar_chart(
-            minmax,
-            output_path=args.minmax_output,
-            num_cpus=args.num_cpus,
-            code_type=args.code_type,
-            core_type=args.core_type,
-            cache_levels=args.cache_levels,
-        )
+    #if args.plot_minmax:
+    #    minmax = compute_minmax_simticks(normalized)
+    #    print("\nMax/min normalized simTicks per (bb, rb, eb):")
+    #    print(minmax.set_index(["bb", "rb", "eb"]))
+    #    plot_minmax_bar_chart(
+    #        minmax,
+    #        output_path=args.minmax_output,
+    #        num_cpus=args.num_cpus,
+    #        code_type=args.code_type,
+    #        core_type=args.core_type,
+    #        cache_levels=args.cache_levels,
+    #    )
 
 
 if __name__ == "__main__":

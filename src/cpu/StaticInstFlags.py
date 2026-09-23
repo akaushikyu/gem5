@@ -72,6 +72,7 @@ class StaticInstFlags(Enum):
         "IsDataPrefetch",  # Data-cache prefetch.
         "IsControl",  # Control transfer instruction.
         "IsDirectControl",  # PC relative control transfer.
+        "IsSpecialControl", # Special control transfer with rd.
         "IsIndirectControl",  # Register indirect control transfer.
         "IsCondControl",  # Conditional control transfer.
         "IsUncondControl",  # Unconditional control transfer.

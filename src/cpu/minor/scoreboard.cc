@@ -107,10 +107,13 @@ Scoreboard::markupInstDests(MinorDynInstPtr inst, Cycles retire_time,
 
     auto *isa = thread_context->getIsaPtr();
 
-    /** Mark each destination register */
+    if (staticInst->isSpecialControl()) {
+      DPRINTF(MinorScoreboard, "%s: Encountered BNERD\n", __func__);
+    }
+
     for (unsigned int dest_index = 0; dest_index < num_dests;
         dest_index++)
-    {
+      {
         RegId reg = staticInst->destRegIdx(dest_index).flatten(*isa);
         Index index;
 
@@ -136,7 +139,8 @@ Scoreboard::markupInstDests(MinorDynInstPtr inst, Cycles retire_time,
             /* Use an invalid ID to mark invalid/untracked dests */
             inst->flatDestRegIdx[dest_index] = RegId();
         }
-    }
+      }
+    //}
 }
 
 InstSeqNum

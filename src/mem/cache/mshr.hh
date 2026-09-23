@@ -317,6 +317,9 @@ class MSHR : public QueueEntry, public Printable
 
     /** True if we need to get a writable copy of the block. */
     bool needsWritable() const { return targets.needsWritable; }
+#if defined (STARVATION_FREEDOM)
+    void updateWritable() { targets.needsWritable = true; }
+#endif
 
     bool isCleaning() const {
         PacketPtr pkt = targets.front().pkt;

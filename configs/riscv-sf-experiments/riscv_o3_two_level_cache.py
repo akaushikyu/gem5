@@ -65,6 +65,9 @@ parser.add_argument("--l2-size", type=str, default=None,
                      help="Shared L2 size, e.g. '2MB'. Defaults to "
                           "256kB * num-cpus if unset")
 
+parser.add_argument("--l1i-size", type=str, default="32kB",
+                     help="L1I size, e.g. '2MB'. Defaults to 32kB")
+
 # ---- O3CPU microarchitectural parameters --------------------------------
 # Pipeline stage widths (instructions/cycle at each stage)
 parser.add_argument("--fetch-width", type=int, default=8)
@@ -81,7 +84,7 @@ parser.add_argument("--fetch-buffer-size", type=int, default=64)
 parser.add_argument("--fetch-queue-size", type=int, default=32)
 
 # Out-of-order core structures
-parser.add_argument("--rob-size", type=int, default=192,
+parser.add_argument("--rob-size", type=int, default=32,
                      help="Reorder buffer (ROB) entries")
 parser.add_argument("--num-iq-entries", type=int, default=64,
                      help="Instruction queue (issue queue) entries")
@@ -226,7 +229,7 @@ for cpu in system.cpu:
     cpu.createInterruptController()
 
 # ---- Private L1 caches (one pair per core) -------------------------------
-system.cpu_icache = [L1ICache() for _ in range(num_cpus)]
+system.cpu_icache = [L1ICache(size=args.l1i_size) for _ in range(num_cpus)]
 system.cpu_dcache = [L1DCache() for _ in range(num_cpus)]
 
 for cpu, icache, dcache in zip(system.cpu, system.cpu_icache, system.cpu_dcache):
