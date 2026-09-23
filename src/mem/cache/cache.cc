@@ -234,10 +234,10 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         DPRINTF(Cache, "%s: Marking SF enabled \n", __func__);
         llscTrack.setSFEnabled();
         pkt->convertLLToSFLL();
+        llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+        DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
+        llscTrack.setStateToLLIssued(diffLLObserved);
       }
-      llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
-      DPRINTF(Cache, "%s: Set state to LL issued\n", __func__);
-      llscTrack.setStateToLLIssued(diffLLObserved);
     } else if (pkt->isSC()) {
       DPRINTF(Cache, "%s: Doing SC %x\n", __func__, pkt->print());
     }
@@ -582,6 +582,9 @@ Cache::createMissPacket(PacketPtr cpu_pkt, CacheBlk *blk,
                         bool needsWritable,
                         bool is_whole_line_write) const
 {
+
+    DPRINTF(Cache, "%s: needs writable %s, is_whole_line_write: %s, pkt: %s\n",
+                    __func__, needsWritable, is_whole_line_write, cpu_pkt->print());
     // should never see evictions here
     assert(!cpu_pkt->isEviction());
 
@@ -647,9 +650,18 @@ Cache::createMissPacket(PacketPtr cpu_pkt, CacheBlk *blk,
         // * this cache is mostly exclusive and will not fill (since
         //   it does not fill it will have to writeback the dirty data
         //   immediately which generates uneccesary writebacks).
+        DPRINTF(Cache, "%s: HERE for cpu_pkt: %s\n", __func__, cpu_pkt->print());
         bool force_clean_rsp = isReadOnly || clusivity == enums::mostly_excl;
+        /*
+#if defined (STARVATION_FREEDOM)
+        if (cpu_pkt->isSFLL()) {
+          cmd = MemCmd::ReadExReq;
+        } else
+#else
+          */
         cmd = needsWritable ? MemCmd::ReadExReq :
             (force_clean_rsp ? MemCmd::ReadCleanReq : MemCmd::ReadSharedReq);
+//#endif
     }
     PacketPtr pkt = new Packet(cpu_pkt->req, cmd, blkSize);
 
@@ -1726,6 +1738,7 @@ Cache::sendMSHRQueuePacket(MSHR* mshr)
         llscTrack.setSFEnabled();
         DPRINTF(Cache, "%s: setting SF attrib \n", __func__);
         tgt_pkt->convertLLToSFLL();
+        mshr->updateWritable();
       }
 #endif
 

@@ -1525,6 +1525,11 @@ class Packet : public Printable, public Extensible<Packet>
     }
 #if defined (STARVATION_FREEDOM)
     bool
+    isSFLL() const {
+      return (cmd == MemCmd::SFLoadLockedReq);
+    }
+
+    bool
     isInvalidateLLSC() const {
       return cmd == MemCmd::InvalidateLLSC;
     }

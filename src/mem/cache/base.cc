@@ -1553,13 +1553,14 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
             if (system->isAddrRegistered(pkt->req->getVaddr() & ~0x3F)) {
               DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
                     __func__, pkt->getBlockAddr(blkSize));
+
+              DPRINTF(Cache, "%s: Tracking LL the address: %x %x\n", \
+                __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
+              llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
+              DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
+              llscTrack.setStateToLLDispatch();
             }
           }
-          DPRINTF(Cache, "%s: Tracking LL the address: %x %x\n", \
-            __func__, pkt->getAddr(), pkt->getBlockAddr(blkSize));
-          llscTrack.recordLLAddr(pkt->getBlockAddr(blkSize));
-          DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
-          llscTrack.setStateToLLDispatch();
         }
 #endif
         return true;
@@ -2005,14 +2006,14 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
         if (system->isAddrRegistered(tgt_pkt->req->getVaddr() & ~0x3F)) {
           DPRINTF(Cache, "%s: Found ROI ADDRESS IN LL %x\n",
                 __func__, tgt_pkt->getBlockAddr(blkSize));
+
+          DPRINTF(Cache, "%s: Tracking the address: %x %x\n", \
+            __func__, tgt_pkt->getAddr(), tgt_pkt->getBlockAddr(blkSize));
+          llscTrack.recordLLAddr(tgt_pkt->getBlockAddr(blkSize));
+          DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
+          llscTrack.setStateToLLDispatch();
         }
       }
-
-      DPRINTF(Cache, "%s: Tracking the address: %x %x\n", \
-          __func__, tgt_pkt->getAddr(), tgt_pkt->getBlockAddr(blkSize));
-      llscTrack.recordLLAddr(tgt_pkt->getBlockAddr(blkSize));
-      DPRINTF(Cache, "%s: Set state to LL dispatched \n", __func__);
-      llscTrack.setStateToLLDispatch();
     }
 #endif
 
